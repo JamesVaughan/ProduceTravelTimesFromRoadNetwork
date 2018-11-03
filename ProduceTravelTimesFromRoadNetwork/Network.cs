@@ -422,8 +422,8 @@ namespace ProduceTravelTimesFromRoadNetwork
             while (toExplore.Count > 0)
             {
                 var current = toExplore.PopMin();
-                // don't explore things that we have already done
-                if (fastestParent.ContainsKey(current.link))
+                // don't explore things that we have already done                
+                if (!fastestParent.TryAdd(current.link, current.parentLink))
                 {
                     // check to see if there are some turns that were restricted that need to be explored
                     continue;
@@ -434,13 +434,13 @@ namespace ProduceTravelTimesFromRoadNetwork
                 {
                     return GeneratePath(fastestParent, current);
                 }
-                fastestParent[current.link] = current.parentLink;
                 var node = _nodes[currentDestination];
                 var links = node.LinksTo;
                 foreach (var childDestination in links)
                 {
                     // explore everything that hasn't been solved, the min heap will update if it is a faster path to the child node
-                    if (!fastestParent.ContainsKey((currentDestination, childDestination)))
+                    (int currentDestination, int childDestination) nextStep = (currentDestination, childDestination);
+                    if (!fastestParent.ContainsKey(nextStep))
                     {
                         // don't explore centroids that are not our destination
                         if(!_nodes[childDestination].Centroid || childDestination == destinationZoneNumber)
@@ -449,10 +449,10 @@ namespace ProduceTravelTimesFromRoadNetwork
                             if (!_turnRestrictions.Contains((current.link.origin, currentDestination, childDestination)))
                             {
                                 // make sure cars are allowed on the link
-                                var linkCost = _links[(currentDestination, childDestination)].GeneralCost;
+                                var linkCost = _links[nextStep].GeneralCost;
                                 if (linkCost >= 0)
                                 {
-                                    toExplore.Push((currentDestination, childDestination), current.link, current.cost + linkCost);
+                                    toExplore.Push(nextStep, current.link, current.cost + linkCost);
                                 }
                             }
                         }

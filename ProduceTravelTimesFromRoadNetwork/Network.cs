@@ -305,6 +305,7 @@ namespace ProduceTravelTimesFromRoadNetwork
         sealed class MinHeap
         {
             private List<((int origin, int destination) link, (int parentOrigin, int parentDestination) parentLink, float cost)> _data = new List<((int, int), (int, int), float)>();
+            private HashSet<(int origin, int destination)> _contained = new HashSet<(int origin, int destination)>();
 
             public int Count => _data.Count;
 
@@ -351,30 +352,34 @@ namespace ProduceTravelTimesFromRoadNetwork
                     }
                     break;
                 }
+                _contained.Remove(top.link);
                 _data.RemoveAt(_data.Count - 1);
                 return (top.link, top.parentLink, top.cost);
             }
 
             public void Push((int origin, int destination) link, (int parentOrigin, int parentDestination) parentLink, float cost)
             {
-                int current = 0;
-                for (; current < _data.Count; current++)
+                int current = _data.Count;
+                if (_contained.Contains(link))
                 {
-                    if (_data[current].link == link)
+                    for (current = 0; current < _data.Count; current++)
                     {
-                        // if we found a better path to this node
-                        if (_data[current].cost > cost)
+                        if (_data[current].link == link)
                         {
-                            var temp = _data[current];
-                            temp.parentLink = parentLink;
-                            temp.cost = cost;
-                            _data[current] = temp;
-                            break;
-                        }
-                        else
-                        {
-                            // if the contained child is already better ignore the request
-                            return;
+                            // if we found a better path to this node
+                            if (_data[current].cost > cost)
+                            {
+                                var temp = _data[current];
+                                temp.parentLink = parentLink;
+                                temp.cost = cost;
+                                _data[current] = temp;
+                                break;
+                            }
+                            else
+                            {
+                                // if the contained child is already better ignore the request
+                                return;
+                            }
                         }
                     }
                 }
@@ -382,6 +387,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                 {
                     // if it is not already contained
                     _data.Add((link, parentLink, cost));
+                    _contained.Add(link);
                 }
                 // we don't need to check the root
                 while (current >= 1)

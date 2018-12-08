@@ -25,13 +25,15 @@ namespace ProduceTravelTimesFromRoadNetwork
     struct Link
     {
         public readonly int I, J;
+        internal readonly float Distance;
         public float GeneralCost;
         public float TravelTime;
 
-        public Link(int i, int j)
+        public Link(int i, int j, float distance)
         {
             I = i;
             J = j;
+            Distance = distance;
             GeneralCost = 0;
             TravelTime = 0;
         }
@@ -49,11 +51,23 @@ namespace ProduceTravelTimesFromRoadNetwork
         }
     }
 
+    struct TransitSegment
+    {
+        public char mode;
+        public string line;
+        public int node;
+    }
+
     sealed class Network
     {
         private readonly Dictionary<int, Node> _nodes = new Dictionary<int, Node>();
         private readonly Dictionary<(int, int), Link> _links = new Dictionary<(int, int), Link>();
         private readonly HashSet<(int i, int j, int k)> _turnRestrictions = new HashSet<(int i, int j, int k)>();
+        /// <summary>
+        /// (int, float) => destination node number, travel time in minutes
+        /// </summary>
+        private readonly Dictionary<string, List<(int, float)>> _transitPaths = new Dictionary<string, List<(int, float)>>();
+        private readonly Dictionary<(int, int), List<TransitSegment>> _pathsThroughTransit = new Dictionary<(int, int), List<TransitSegment>>();
 
         private Network()
         {
@@ -77,7 +91,17 @@ namespace ProduceTravelTimesFromRoadNetwork
             _turnRestrictions.Add((turn.I, turn.J, turn.K));
         }
 
-        public static Network LoadNetwork(string nwpPath, string shapeFile, string zoneFieldName)
+        private void Add(string lineName, List<(int, float)> transitPath)
+        {
+            _transitPaths.Add(lineName, transitPath);
+        }
+
+        private void Add(int origin, int destination, List<TransitSegment> path)
+        {
+            _pathsThroughTransit.Add((origin, destination), path);
+        }
+
+        public static Network LoadNetwork(string nwpPath, string shapeFile, string zoneFieldName, string transitPaths)
         {
             if (string.IsNullOrWhiteSpace(nwpPath))
             {
@@ -94,10 +118,10 @@ namespace ProduceTravelTimesFromRoadNetwork
                 throw new ArgumentException("We need to know the name of the field to load the zones numbers from.", nameof(zoneFieldName));
             }
             // Load the shape file
-            return LoadNWP(nwpPath, LoadZones(shapeFile, zoneFieldName));
+            return LoadNWP(nwpPath, LoadZones(shapeFile, zoneFieldName), transitPaths);
         }
 
-        private static Network LoadNWP(string NWPLocation, List<(int zoneNumber, IGeometry geometry)> zones)
+        private static Network LoadNWP(string NWPLocation, List<(int zoneNumber, IGeometry geometry)> zones, string transitODPaths)
         {
             if (!File.Exists(NWPLocation))
             {
@@ -106,7 +130,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             Network network = new Network();
             using (ZipArchive archive = new ZipArchive(File.OpenRead(NWPLocation), ZipArchiveMode.Read, false))
             {
-                ZipArchiveEntry nodes = null, links = null, exAtt = null, turns = null;
+                ZipArchiveEntry nodes = null, links = null, exAtt = null, turns = null, transit = null;
                 foreach (var entry in archive.Entries)
                 {
                     if (entry.Name.Equals("base.211", StringComparison.InvariantCultureIgnoreCase))
@@ -121,16 +145,34 @@ namespace ProduceTravelTimesFromRoadNetwork
                     {
                         exAtt = entry;
                     }
-                    else if(entry.Name.Equals("turns.231", StringComparison.InvariantCultureIgnoreCase))
+                    else if (entry.Name.Equals("turns.231", StringComparison.InvariantCultureIgnoreCase))
                     {
                         turns = entry;
                     }
+                    else if (entry.Name.Equals("segment_results.csv", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        transit = entry;
+                    }
                 }
-                LoadNodes(nodes, network, zones);
-                LoadLinks(links, exAtt, network);
-                LoadTurns(turns, network);
+                Parallel.Invoke(
+                    () =>
+                    {
+                        LoadNodes(nodes, network, zones);
+                        LoadLinks(links, exAtt, network);
+                        LoadTurns(turns, network);
+                        if (transit != null)
+                        {
+                            LoadTransitResults(transit, network);
+                        }
+                    },
+                    () => LoadPaths(transitODPaths, network));
                 return network;
             }
+        }
+
+        internal float GetDistance(int origin, int destination)
+        {
+            return _links[(origin, destination)].Distance;
         }
 
         private static void LoadNodes(ZipArchiveEntry nodeArchive, Network network, List<(int, IGeometry)> zones)
@@ -191,7 +233,9 @@ namespace ProduceTravelTimesFromRoadNetwork
                     var parts = line.Split(',');
                     if (parts.Length >= 5)
                     {
-                        network.Add(new Link(int.Parse(parts[0]), int.Parse(parts[1]))
+                        var o = int.Parse(parts[0]);
+                        var d = int.Parse(parts[1]);
+                        network.Add(new Link(o, d, ComputetDistance(network, o, d))
                         {
                             TravelTime = float.Parse(parts[4])
                         });
@@ -218,12 +262,21 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
         }
 
+        private static float ComputetDistance(Network network, int originNode, int destinationNode)
+        {
+            var o = network._nodes[originNode];
+            var d = network._nodes[destinationNode];
+            var deltaX = (o.X - d.X);
+            var deltaY = (o.Y - d.Y);
+            return (float)Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
+        }
+
         private static void LoadTurns(ZipArchiveEntry turnsArchive, Network network)
         {
             using (var reader = new StreamReader(turnsArchive.Open()))
             {
                 string line = null;
-                const string nodesMarker = "t nodes";
+                const string nodesMarker = "t turns";
                 while ((line = reader.ReadLine()) != null && line != nodesMarker) ;
                 if (line != nodesMarker)
                 {
@@ -245,6 +298,171 @@ namespace ProduceTravelTimesFromRoadNetwork
                             {
                                 network.Add(new TurnRestriction(int.Parse(split[1]), int.Parse(split[2]), int.Parse(split[3])));
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void LoadTransitResults(ZipArchiveEntry transitArchive, Network network)
+        {
+            using (var reader = new StreamReader(transitArchive.Open()))
+            {
+                // burn header
+                reader.ReadLine();
+                string line;
+                var seperators = new char[] { ',', '\t' };
+                var currentPath = new List<(int, float)>();
+                string currentLine = null;
+                void Store()
+                {
+                    if (currentLine != null)
+                    {
+                        network.Add(currentLine, currentPath);
+                        currentLine = null;
+                        // this needs to be a new object
+                        currentPath = new List<(int,float)>();
+                    }
+                }
+                while ((line = reader.ReadLine()) != null)
+                {
+                    var parts = line.Split(seperators);
+                    if(parts.Length >= 7)
+                    {
+                        var i = int.Parse(parts[1]);
+                        var j = int.Parse(parts[2]);
+                        if (parts[0] != currentLine)
+                        {
+                            Store();
+                            currentLine = parts[0];
+                            currentPath.Add((i, 0));
+                        }
+                        var travelTime = float.Parse(parts[5]);
+                        currentPath.Add((j, travelTime));
+                    }
+                }
+                // Make sure to store the last line
+                Store();
+            }
+        }
+
+        /*
+        private static void LoadTransitSegments(ZipArchiveEntry transitArchive, Network network)
+        {
+            using (var reader = new StreamReader(transitArchive.Open()))
+            {
+                string line = null;
+                const string nodesMarker = "t lines";
+                while ((line = reader.ReadLine()) != null && line != nodesMarker) ;
+                if (line != nodesMarker)
+                {
+                    return;
+                }
+                // burn the header
+                reader.ReadLine();
+                var seperators = new char[] { ' ', '\t' };
+                string currentLine = null;
+                List<int> currentPath = new List<int>();
+                void Store()
+                {
+                    if (currentLine != null)
+                    {
+                        network.Add(currentLine, currentPath);
+                        currentLine = null;
+                        // this needs to be a new object
+                        currentPath = new List<int>();
+                    }
+                }
+                while ((line = reader.ReadLine()) != null && line[0] != 't')
+                {
+                    // ignore blank lines
+                    if (line.Length > 2)
+                    {
+                        if (line[0] == 'c')
+                        {
+                            continue;
+                        }
+                        else if (line[0] == 'a')
+                        {
+                            Store();
+                            // a'B00001' b   1  36.00  18.60 '402B                '      0      0      0
+                            currentLine = line.Substring(2, line.IndexOf('\'', 2) - 2);
+                        }
+                        else
+                        {
+                            var split = line.Split(seperators, StringSplitOptions.RemoveEmptyEntries);
+                            if (split.Length > 0)
+                            {
+                                // the path line, just ignore
+                                if (split[0].Length > 0 && split[0][0] == 'p')
+                                {
+                                    continue;
+                                }
+                                else
+                                {
+                                    if (int.TryParse(split[0], out var node))
+                                    {
+                                        currentPath.Add(node);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Store();
+            }
+        }
+        */
+
+        private static void LoadPaths(string transitODPaths, Network network)
+        {
+            /*
+                c all paths
+                c
+                c orig dest pathnum prop imped twaitime tinvtime tauxtime dist orig <aux. transit> <transit>
+                c      <aux. transit>  mode -    node
+                c      <transit>       mode line node
+             */
+            using (var reader = new StreamReader(transitODPaths))
+            {
+                string line = null;
+                var seperators = new char[] { ' ', '\t' };
+                while ((line = reader.ReadLine()) != null)
+                {
+                    var length = line.Length;
+                    // skip lines that are comments
+                    if (length > 0 && line[0] == 'c')
+                    {
+                        continue;
+                    }
+                    var parts = line.Split(seperators);
+                    // AuxTransit: mode - node
+                    // Transit   : mode line node
+                    const int startOfPaths = 10;
+                    const int partsPerSegment = 3;
+                    if (parts.Length > startOfPaths)
+                    {
+                        // ignore paths that are not the first path
+                        if (int.TryParse(parts[0], out var origin)
+                            && int.TryParse(parts[1], out var destination)
+                            && int.TryParse(parts[2], out var pathNumber) && pathNumber == 1)
+                        {
+                            // prop[3], imped[4], twaittime[5], tinvtime[6], tauxtime[7], dist[8]
+                            // startNode[9] (same as origin)
+                            List<TransitSegment> path = new List<TransitSegment>(Math.Max(0, (parts.Length - startOfPaths) / partsPerSegment))
+                            {
+                                new TransitSegment() { node = origin }
+                            };
+                            for (int i = startOfPaths; i < parts.Length - partsPerSegment; i += partsPerSegment)
+                            {
+                                path.Add(new TransitSegment()
+                                {
+                                    mode = parts[i][0],
+                                    line = parts[i + 1],
+                                    node = int.Parse(parts[i + 2])
+                                });
+                            }
+                            network.Add(origin, destination, path);
                         }
                     }
                 }
@@ -314,7 +532,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                 var tailIndex = _data.Count - 1;
                 if (tailIndex < 0)
                 {
-                    return ((-1, -1),(-1, -1),-1);
+                    return ((-1, -1), (-1, -1), -1);
                 }
                 var top = _data[0];
                 var last = _data[tailIndex];
@@ -443,7 +661,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     if (!fastestParent.ContainsKey(nextStep))
                     {
                         // don't explore centroids that are not our destination
-                        if(!_nodes[childDestination].Centroid || childDestination == destinationZoneNumber)
+                        if (!_nodes[childDestination].Centroid || childDestination == destinationZoneNumber)
                         {
                             // ensure there is not a turn restriction
                             if (!_turnRestrictions.Contains((current.link.origin, currentDestination, childDestination)))
@@ -498,6 +716,50 @@ namespace ProduceTravelTimesFromRoadNetwork
         public float GetTime(int origin, int destination)
         {
             return _links[(origin, destination)].TravelTime;
+        }
+
+        public int GetZone(int nodeNumber)
+        {
+            return _nodes[nodeNumber].ZoneNumber;
+        }
+
+        public List<(int, float)> GetTransitTravelOnRouteSegments(string routeName, int originOnRoute, int destinationOnRoute)
+        {
+            if(!_transitPaths.TryGetValue(routeName, out var path))
+            {
+                return null;
+            }
+            var ret = new List<(int, float)>();
+            // find the origin point
+            int i = 0;
+            for (; i < path.Count; i++)
+            {
+                if(path[i].Item1 == originOnRoute)
+                {
+                    ret.Add(path[i]);
+                    break;
+                }
+            }
+            // store until you find the destination
+            for (i = i + 1; i < path.Count; i++)
+            {
+                if(path[i].Item1 == originOnRoute)
+                {
+                    ret.Clear();
+                }
+                ret.Add(path[i]);
+                if (path[i].Item1 == destinationOnRoute)
+                {
+                    break;
+                }
+            }
+            return ret;
+        }
+
+        public IReadOnlyList<TransitSegment> GetPathThroughTransit(int origin, int destination)
+        {
+            _pathsThroughTransit.TryGetValue((origin, destination), out var ret);
+            return ret;
         }
     }
 }

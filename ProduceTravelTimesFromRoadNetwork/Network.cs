@@ -61,6 +61,7 @@ namespace ProduceTravelTimesFromRoadNetwork
     sealed class Network
     {
         private readonly Dictionary<int, Node> _nodes = new Dictionary<int, Node>();
+        private readonly Dictionary<int, List<Node>> _centroidsInZone = new Dictionary<int, List<Node>>();
         private readonly Dictionary<(int, int), Link> _links = new Dictionary<(int, int), Link>();
         private readonly HashSet<(int i, int j, int k)> _turnRestrictions = new HashSet<(int i, int j, int k)>();
         /// <summary>
@@ -78,6 +79,15 @@ namespace ProduceTravelTimesFromRoadNetwork
         {
             node.LinksTo = node.LinksTo ?? new List<int>();
             _nodes[node.NodeNumber] = node;
+            if(node.Centroid)
+            {
+                if(!_centroidsInZone.TryGetValue(node.ZoneNumber, out var centoidList))
+                {
+                    centoidList = new List<Node>();
+                    _centroidsInZone[node.ZoneNumber] = centoidList;
+                }
+                centoidList.Add(node);
+            }
         }
 
         private void Add(Link link)
@@ -130,7 +140,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             Network network = new Network();
             using (ZipArchive archive = new ZipArchive(File.OpenRead(NWPLocation), ZipArchiveMode.Read, false))
             {
-                ZipArchiveEntry nodes = null, links = null, exAtt = null, turns = null, transit = null;
+                ZipArchiveEntry nodes = null, links = null, exAtt = null, turns = null, transitSegments = null, transit = null;
                 foreach (var entry in archive.Entries)
                 {
                     if (entry.Name.Equals("base.211", StringComparison.InvariantCultureIgnoreCase))
@@ -149,6 +159,10 @@ namespace ProduceTravelTimesFromRoadNetwork
                     {
                         turns = entry;
                     }
+                    else if (entry.Name.Equals("transit.221", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        transitSegments = entry;
+                    }
                     else if (entry.Name.Equals("segment_results.csv", StringComparison.InvariantCultureIgnoreCase))
                     {
                         transit = entry;
@@ -162,6 +176,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         LoadTurns(turns, network);
                         if (transit != null)
                         {
+                            LoadTransitSegments(transitSegments, network);
                             LoadTransitResults(transit, network);
                         }
                     },
@@ -170,8 +185,22 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
         }
 
+        internal bool PickCentroidInZone(ref int zone, Random r)
+        {
+            if(!_centroidsInZone.TryGetValue(zone, out var centroids))
+            {
+                return false;
+            }
+            zone = centroids[r.Next(centroids.Count)].NodeNumber;
+            return true;
+        }
+
         internal float GetDistance(int origin, int destination)
         {
+            if (origin <= -1 || origin == destination)
+            {
+                return 0f;
+            }
             return _links[(origin, destination)].Distance;
         }
 
@@ -271,6 +300,8 @@ namespace ProduceTravelTimesFromRoadNetwork
             return (float)Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
         }
 
+        internal float ComputeDistance(int origin, int destination) => Network.ComputetDistance(this, origin, destination);
+
         private static void LoadTurns(ZipArchiveEntry turnsArchive, Network network)
         {
             using (var reader = new StreamReader(turnsArchive.Open()))
@@ -313,40 +344,36 @@ namespace ProduceTravelTimesFromRoadNetwork
                 string line;
                 var seperators = new char[] { ',', '\t' };
                 var currentPath = new List<(int, float)>();
-                string currentLine = null;
-                void Store()
-                {
-                    if (currentLine != null)
-                    {
-                        network.Add(currentLine, currentPath);
-                        currentLine = null;
-                        // this needs to be a new object
-                        currentPath = new List<(int,float)>();
-                    }
-                }
                 while ((line = reader.ReadLine()) != null)
                 {
                     var parts = line.Split(seperators);
-                    if(parts.Length >= 7)
+                    if (parts.Length >= 7)
                     {
                         var i = int.Parse(parts[1]);
                         var j = int.Parse(parts[2]);
-                        if (parts[0] != currentLine)
-                        {
-                            Store();
-                            currentLine = parts[0];
-                            currentPath.Add((i, 0));
-                        }
+                        var loop = int.Parse(parts[3]);
                         var travelTime = float.Parse(parts[5]);
-                        currentPath.Add((j, travelTime));
+                        var segments = network._transitPaths[parts[0]];
+                        int currentLoop = 0;
+                        var prev = segments[0].Item1;
+                        for (int seg = 1; seg < segments.Count; seg++)
+                        {
+                            if(segments[seg].Item1 == j && prev == i)
+                            {
+                                if(++currentLoop == loop)
+                                {
+                                    // update the segment with a travel time
+                                    segments[seg] = (segments[seg].Item1, travelTime);
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
-                // Make sure to store the last line
-                Store();
             }
         }
 
-        /*
+
         private static void LoadTransitSegments(ZipArchiveEntry transitArchive, Network network)
         {
             using (var reader = new StreamReader(transitArchive.Open()))
@@ -362,7 +389,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                 reader.ReadLine();
                 var seperators = new char[] { ' ', '\t' };
                 string currentLine = null;
-                List<int> currentPath = new List<int>();
+                var currentPath = new List<(int, float)>();
                 void Store()
                 {
                     if (currentLine != null)
@@ -370,7 +397,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         network.Add(currentLine, currentPath);
                         currentLine = null;
                         // this needs to be a new object
-                        currentPath = new List<int>();
+                        currentPath = new List<(int, float)>();
                     }
                 }
                 while ((line = reader.ReadLine()) != null && line[0] != 't')
@@ -402,7 +429,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                                 {
                                     if (int.TryParse(split[0], out var node))
                                     {
-                                        currentPath.Add(node);
+                                        // we will get the transit time from the results
+                                        currentPath.Add((node, 0f));
                                     }
                                 }
                             }
@@ -412,7 +440,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                 Store();
             }
         }
-        */
+
 
         private static void LoadPaths(string transitODPaths, Network network)
         {
@@ -458,7 +486,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                                 path.Add(new TransitSegment()
                                 {
                                     mode = parts[i][0],
-                                    line = parts[i + 1],
+                                    // make sure to remove the ''s around the line name if it is a line
+                                    line = parts[i + 1].Length < 3 ? parts[i + 1] : parts[i + 1].Substring(1, parts[i + 1].Length - 2),
                                     node = int.Parse(parts[i + 2])
                                 });
                             }
@@ -710,11 +739,19 @@ namespace ProduceTravelTimesFromRoadNetwork
 
         public float GetCost(int origin, int destination)
         {
+            if (origin <= -1)
+            {
+                return 0f;
+            }
             return _links[(origin, destination)].GeneralCost;
         }
 
         public float GetTime(int origin, int destination)
         {
+            if (origin <= -1)
+            {
+                return 0f;
+            }
             return _links[(origin, destination)].TravelTime;
         }
 
@@ -724,8 +761,8 @@ namespace ProduceTravelTimesFromRoadNetwork
         }
 
         public List<(int, float)> GetTransitTravelOnRouteSegments(string routeName, int originOnRoute, int destinationOnRoute)
-        {
-            if(!_transitPaths.TryGetValue(routeName, out var path))
+        {           
+            if (!_transitPaths.TryGetValue(routeName, out var path))
             {
                 return null;
             }
@@ -734,7 +771,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             int i = 0;
             for (; i < path.Count; i++)
             {
-                if(path[i].Item1 == originOnRoute)
+                if (path[i].Item1 == originOnRoute)
                 {
                     ret.Add(path[i]);
                     break;
@@ -743,7 +780,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             // store until you find the destination
             for (i = i + 1; i < path.Count; i++)
             {
-                if(path[i].Item1 == originOnRoute)
+                if (path[i].Item1 == originOnRoute)
                 {
                     ret.Clear();
                 }

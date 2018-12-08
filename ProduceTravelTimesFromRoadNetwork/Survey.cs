@@ -13,7 +13,7 @@ namespace ProduceTravelTimesFromRoadNetwork
         /// <summary>
         /// In Minutes from Midnight
         /// </summary>
-        internal float TripStart;
+        internal float TripStartTime;
         /// <summary>
         /// In Minutes from Midnight
         /// </summary>
@@ -39,32 +39,27 @@ namespace ProduceTravelTimesFromRoadNetwork
         }
     }
 
+    
+
     static class Survey
     {
         public static IEnumerable<SurveyEntry> EnumerateSurvey(string filePath)
         {
-            using (var reader = new StreamReader(filePath))
+            using (var reader = new CsvReader(filePath))
             {
                 // burn header
-                reader.ReadLine();
-                string line;
+                reader.LoadLine();
                 long currentPerson = 0;
                 bool validPerson = false;
                 var seperators = new char[] { ',', '\t' };
                 var toReturn = new SurveyEntry();
-                while ((line = reader.ReadLine()) != null)
+                while (reader.LoadLine(out var columns))
                 {
-                    var parts = line.Split(seperators);
-                    if (parts.Length > 19)
+                    if (columns > 19)
                     {
                         TripEntry trip;
                         // the last two digits are the ID for the trip
-                        long personNumber;
-                        if(!long.TryParse(parts[19], out personNumber))
-                        {
-                            personNumber = 0;
-                            continue;
-                        }
+                        reader.Get(out long personNumber, 19);
                         personNumber = personNumber / 100;
                         if (personNumber != currentPerson)
                         {
@@ -80,10 +75,13 @@ namespace ProduceTravelTimesFromRoadNetwork
                             currentPerson = personNumber;
                             validPerson = true;
                         }
-                        if (!ConvertFloatStringToInt(parts[6], out trip.Origin)
-                            || !ConvertFloatStringToInt(parts[7], out trip.Destination)
-                            || !ConvertMode(parts[9], out trip.Mode) || !ConvertTime(parts[4], out trip.TripStart) || !ConvertTime(parts[5], out trip.TripEndTime))
-
+                        if (!ConvertFloatStringToInt(reader, 6, out trip.Origin)
+                            || !ConvertFloatStringToInt(reader, 7, out trip.Destination)
+                            || !ConvertMode(reader, 9, out trip.Mode) || !ConvertTime(reader, 4, out trip.TripStartTime) || !ConvertTime(reader, 5, out trip.TripEndTime)
+                            || !ConvertFloatStringToInt(reader, 22, out var originInZone)
+                            || !ConvertFloatStringToInt(reader, 23, out var destinationInZone)
+                            || originInZone < 1f
+                            || destinationInZone < 1f)
                         {
                             validPerson = false;
                         }
@@ -100,9 +98,79 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
         }
 
-        private static bool ConvertFloatStringToInt(string toConvert, out int value)
+        public static IEnumerable<SurveyEntry> EnumerateCellTraces(Network am, string stepFilePath, string hopFilePath)
         {
-            if(!float.TryParse(toConvert, out var temp))
+            Random r = new Random();
+            using (var reader = new CsvReader(stepFilePath))
+            {
+                // burn header
+                reader.LoadLine();
+                string previousPersonID = null;
+                string previousDate = null;
+                bool validPerson = false;
+                var toReturn = new SurveyEntry();
+                while (reader.LoadLine(out var columns))
+                {
+                    if (columns >= 7)
+                    {
+                        reader.Get(out string stepType, 7);
+                        reader.Get(out string date, 0);
+                        if (stepType == "trip")
+                        {
+                            reader.Get(out string personID, 1);
+                            // if we are starting a new person
+                            if (previousPersonID != personID)
+                            {
+                                if (validPerson)
+                                {
+                                    yield return toReturn;
+                                    validPerson = true;
+                                    toReturn = new SurveyEntry();
+                                }
+                                else
+                                {
+                                    validPerson = true;
+                                    toReturn.Trips.Clear();
+                                }
+                                previousDate = date;
+                                previousPersonID = personID;
+                            }
+                            // only sore the data if they are valid
+                            if (validPerson)
+                            {
+                                reader.Get(out int origin, 3);
+                                reader.Get(out int destination, 4);
+                                reader.Get(out float tripStart, 5);
+                                reader.Get(out float tripEnd, 6);
+                                if (!am.PickCentroidInZone(ref origin, r)
+                                    || !am.PickCentroidInZone(ref destination, r))
+                                {
+                                    validPerson = false;
+                                    continue;
+                                }
+                                toReturn.Add(new TripEntry()
+                                {
+                                    Mode = 0,
+                                    TripStartTime = tripStart,
+                                    TripEndTime = tripEnd,
+                                    Origin = origin,
+                                    Destination = destination
+                                });
+                            }
+                        }
+                    }
+                }
+                if (validPerson)
+                {
+                    yield return toReturn;
+                }
+            }
+        }
+
+        private static bool ConvertFloatStringToInt(CsvReader reader, int column, out int value)
+        {
+            reader.Get(out string toConvert, column);
+            if (!float.TryParse(toConvert, out var temp))
             {
                 value = 0;
                 return false;
@@ -111,7 +179,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             return true;
         }
 
-        private static bool ConvertMode(string modeString, out byte mode)
+        private static bool ConvertMode(CsvReader reader, int column, out byte mode)
         {
             mode = 0;
             /*
@@ -131,7 +199,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                 13 "Bus" = 'Bus'
                 14 "Ferrocarril" = 'Railway'
              */
-            if(String.IsNullOrWhiteSpace(modeString))
+            reader.Get(out string modeString, column);
+            if (String.IsNullOrWhiteSpace(modeString))
             {
                 return false;
             }
@@ -165,14 +234,21 @@ namespace ProduceTravelTimesFromRoadNetwork
             return true;
         }
 
-        private static bool ConvertTime(string timeString, out float tripStart)
+        private static bool ConvertTime(CsvReader reader, int column, out float tripStart)
         {
+            reader.Get(out string timeString, column);
             if (String.IsNullOrWhiteSpace(timeString))
             {
                 tripStart = -1;
                 return false;
             }
-            tripStart = float.Parse(timeString) / 60f;
+            if (!float.TryParse(timeString, out tripStart))
+            {
+                return false;
+            }
+            var hour = (int)tripStart;
+            var ret = (hour * 60f) + (tripStart - hour) * 100f;
+            tripStart = ret;
             return true;
         }
     }

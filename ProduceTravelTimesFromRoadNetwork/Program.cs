@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using System.Collections.Concurrent;
 
 namespace ProduceTravelTimesFromRoadNetwork
 {
@@ -15,6 +17,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.Write("Loading Networks...");
             Stopwatch stopwatch = Stopwatch.StartNew();
             Network networkAM = null, networkMD = null, networkPM = null, networkEV = null;
+
             Parallel.Invoke(
                 () => networkAM = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\AM.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
                                         , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsAM.txt"),
@@ -28,22 +31,124 @@ namespace ProduceTravelTimesFromRoadNetwork
             stopwatch.Stop();
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
+            /*
             using (StreamWriter writer = new StreamWriter("SyntheticCellTraces.txt"))
+            using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest.txt"))
             {
+                bool first = true;
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
                 {
-                    WriteRecordsFor(writer, networks, personRecord);
+                    WriteRecordsFor(first ? writer : writer2, networks, personRecord, false);
+                    first = !first;
                 }
             }
+            */
+
+            ConcurrentQueue<StringBuilder> builderPool = new ConcurrentQueue<StringBuilder>();
+
+            using (StreamWriter writer = new StreamWriter("ReadCellTraces.txt"))
+            {
+                foreach(var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv")
+                    .AsParallel()
+                    .Select(personRecord => CleanPersonRecord(networkAM, personRecord))
+                    .Select(personRecord =>
+                    {
+                        /* draw two buffers */
+                        if (!builderPool.TryDequeue(out var buffer))
+                        {
+                            buffer = new StringBuilder(0x4000);
+                        }
+                        else
+                        {
+                            buffer.Clear();
+                        }
+                        if (!builderPool.TryDequeue(out var buffer2))
+                        {
+                            buffer2 = new StringBuilder(0x4000);
+                        }
+                        else
+                        {
+                            buffer2.Clear();
+                        }
+                        var ret = RecordsFor(buffer, buffer2, networks, personRecord, true);
+                        // return back our temporary buffer
+                        if (builderPool.Count < Environment.ProcessorCount * 2)
+                        {
+                            builderPool.Enqueue(buffer2);
+                        }
+                        return ret;
+                    }
+                ))
+                {
+                    // write it out
+                    if (toWrite != null && toWrite.Length > 0)
+                    {
+                        writer?.Write(toWrite);
+                    }
+                    if(builderPool.Count < Environment.ProcessorCount * 2)
+                    {
+                        builderPool.Enqueue(toWrite);
+                    }
+                }
+            }
+        }
+
+        private static SurveyEntry CleanPersonRecord(Network network, SurveyEntry personRecord)
+        {
+            var trips = personRecord?.Trips;
+            if (trips != null)
+            {
+                // remove short trips
+                for (int i = 0; i < trips.Count; i++)
+                {
+                    if (trips[i].TripEndTime - trips[i].TripStartTime < 5.0f)
+                    {
+                        trips.RemoveAt(i);
+                    }
+                }
+                // remove trips that are too fast
+                for (int i = 0; i < trips.Count; i++)
+                {
+                    var distance = network.ComputeDistance(trips[i].Origin, trips[i].Destination);
+                    var deltaTime = trips[i].TripEndTime - trips[i].TripStartTime;
+                    // remove trips that are faster than 120km/h
+                    if (distance / deltaTime > 200.0f)
+                    {
+                        trips.RemoveAt(i);
+                    }
+                }
+            }
+            return personRecord;
         }
 
         private static int GetTimeOfDay(int timeSlice)
         {
             // TODO: Pick the other time periods
-            return 0;
+            const int amStart = 6 * 12;
+            const int mdStart = 9 * 12;
+            const int pmStart = 15 * 12;
+            const int evStart = 19 * 12;
+            // if it is before the PM
+            if(timeSlice < pmStart)
+            {
+                if(timeSlice < amStart)
+                {
+                    return 3;
+                }
+                if(timeSlice < mdStart)
+                {
+                    return 0;
+                }
+                return 1;
+            }
+            if(timeSlice < evStart)
+            {
+                return 2;
+            }
+            return 3;
         }
 
-        static void WriteRecordsFor(StreamWriter writer, Network[] network, SurveyEntry entry)
+        static StringBuilder RecordsFor(StringBuilder writer, StringBuilder mainFeatures, Network[] network, SurveyEntry entry, bool applyODInsteadOfMode)
         {
             /*
              * Step 1) Find nextTrip
@@ -52,35 +157,42 @@ namespace ProduceTravelTimesFromRoadNetwork
              */
             var trips = entry.Trips;
             int timeStep = 0;
-            StringBuilder mainFeatures = new StringBuilder();
             const int minutesPerTimeStep = 5;
             // km/minute
             const float walkSpeed = 4.0f / 60.0f;
             const int numberOfModes = 3;
             const int numberOfSegmentsInADay = (60 * 24) / minutesPerTimeStep;
-            if(entry.Trips.Count <= 0)
+            // return back the empty buffer
+            if (entry.Trips.Count <= 0)
             {
-                return;
+                return writer;
             }
             var currentZone = network[0].GetZone(entry.Trips[0].Origin);
             void EmitNothing()
             {
                 mainFeatures.Append("0 ");
+                timeStep++;
+            }
+            void emitDistance(float distance)
+            {
+                mainFeatures.Append(Math.Min(1.0f, distance / 100000f));
+                mainFeatures.Append(' ');
+                timeStep++;
             }
             mainFeatures.Append("|features ");
             for (int i = 0; i < trips.Count; i++)
             {
-                // check to see if the day is over
-                if(timeStep >= numberOfSegmentsInADay)
-                {
-                    break;
-                }
-                var startTime = (int)Math.Round(trips[i].TripStart, 0) / minutesPerTimeStep;
+                var startTime = (int)Math.Round(trips[i].TripStartTime, 0) / minutesPerTimeStep;
                 // Step 2
-                for (; timeStep < startTime; timeStep++)
+                for (; timeStep < startTime && timeStep < numberOfSegmentsInADay;)
                 {
                     // TODO: Change this to emit more than nothing
                     EmitNothing();
+                }
+                // check to see if the day is over
+                if (timeStep >= numberOfSegmentsInADay)
+                {
+                    break;
                 }
                 if (trips[i].Origin != trips[i].Destination)
                 {
@@ -91,7 +203,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         // auto
                         case 0:
                             {
-                                var path = network[i].GetFastestPath(trips[i].Origin, trips[i].Destination);
+                                var path = network[timeOfDay].GetFastestPath(trips[i].Origin, trips[i].Destination);
                                 if (path == null)
                                 {
                                     throw new InvalidOperationException($"Unable to find a path between {trips[i].Origin} and {trips[i].Destination}!");
@@ -113,12 +225,10 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     if (accTime >= minutesPerTimeStep)
                                     {
                                         accTime -= minutesPerTimeStep;
-                                        timeStep++;
                                         // if we have changed zones record how far we have travelled
                                         if (changeZone)
                                         {
-                                            mainFeatures.Append(distance);
-                                            mainFeatures.Append(" ");
+                                            emitDistance(distance);
                                             distance = 0.0f;
                                             changeZone = false;
                                         }
@@ -129,18 +239,16 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     }
                                 }
                                 // clean up the remainder
-                                if (changeZone)
+                                if (changeZone && timeStep < numberOfSegmentsInADay)
                                 {
-                                    mainFeatures.Append(distance);
-                                    mainFeatures.Append(" ");
-                                    timeStep++;
+                                    emitDistance(distance);
                                 }
                             }
                             break;
                         // transit
                         case 1:
                             {
-                                var path = network[i].GetPathThroughTransit(trips[i].Origin, trips[i].Destination);
+                                var path = network[timeOfDay].GetPathThroughTransit(trips[i].Origin, trips[i].Destination);
                                 if (path == null)
                                 {
                                     throw new InvalidOperationException($"Unable to find a path between {trips[i].Origin} and {trips[i].Destination}!");
@@ -158,6 +266,11 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     if (path[j].line != "-")
                                     {
                                         var subPath = network[timeOfDay].GetTransitTravelOnRouteSegments(path[j].line, currentNode, path[j].node);
+                                        if (subPath == null)
+                                        {
+                                            Console.WriteLine("No path from " + currentNode + " to " + path[j].node + " on transit line " + path[j].line);
+                                            System.Environment.Exit(0);
+                                        }
                                         for (int k = 0; k < subPath.Count && timeStep < numberOfSegmentsInADay; k++)
                                         {
                                             var (destinationNode, time) = subPath[k];
@@ -169,11 +282,9 @@ namespace ProduceTravelTimesFromRoadNetwork
                                             if (accTime >= minutesPerTimeStep)
                                             {
                                                 accTime -= minutesPerTimeStep;
-                                                timeStep++;
                                                 if (changeZone)
                                                 {
-                                                    mainFeatures.Append(distance);
-                                                    mainFeatures.Append(" ");
+                                                    emitDistance(distance);
                                                     distance = 0.0f;
                                                     changeZone = false;
                                                 }
@@ -189,7 +300,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     // aux transit
                                     else
                                     {
-                                        var d = network[timeOfDay].GetDistance(currentZone, path[j].node);
+                                        var d = network[timeOfDay].GetDistance(currentNode, path[j].node);
                                         var destinationZone = network[timeOfDay].GetZone(path[j].node);
                                         changeZone = changeZone | (currentZone != destinationZone);
                                         currentZone = destinationZone;
@@ -198,11 +309,9 @@ namespace ProduceTravelTimesFromRoadNetwork
                                         if (accTime >= minutesPerTimeStep)
                                         {
                                             accTime -= minutesPerTimeStep;
-                                            timeStep++;
                                             if (changeZone)
                                             {
-                                                mainFeatures.Append(distance);
-                                                mainFeatures.Append(" ");
+                                                emitDistance(distance);
                                                 distance = 0.0f;
                                                 changeZone = false;
                                             }
@@ -216,11 +325,9 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     currentNode = path[j].node;
                                 }
                                 // clean up the remainder
-                                if (changeZone)
+                                if (changeZone && timeStep < numberOfSegmentsInADay)
                                 {
-                                    mainFeatures.Append(distance);
-                                    mainFeatures.Append(" ");
-                                    timeStep++;
+                                    emitDistance(distance);
                                 }
                             }
                             break;
@@ -228,7 +335,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         case 2:
                             // walk along the road?
                             {
-                                var path = network[i].GetFastestPath(trips[i].Origin, trips[i].Destination);
+                                var path = network[timeOfDay].GetFastestPath(trips[i].Origin, trips[i].Destination);
                                 if (path == null)
                                 {
                                     throw new InvalidOperationException($"Unable to find a path between {trips[i].Origin} and {trips[i].Destination}!");
@@ -249,12 +356,10 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     if (accTime >= minutesPerTimeStep)
                                     {
                                         accTime -= minutesPerTimeStep;
-                                        timeStep++;
                                         // if we have changed zones record how far we have travelled
                                         if (changeZone)
                                         {
-                                            mainFeatures.Append(distance);
-                                            mainFeatures.Append(" ");
+                                            emitDistance(distance);
                                             distance = 0.0f;
                                             changeZone = false;
                                         }
@@ -265,11 +370,9 @@ namespace ProduceTravelTimesFromRoadNetwork
                                     }
                                 }
                                 // clean up the remainder
-                                if (changeZone)
+                                if (changeZone && timeStep < numberOfSegmentsInADay)
                                 {
-                                    mainFeatures.Append(distance);
-                                    mainFeatures.Append(" ");
-                                    timeStep++;
+                                    emitDistance(distance);
                                 }
                             }
                             break;
@@ -283,26 +386,48 @@ namespace ProduceTravelTimesFromRoadNetwork
                     // just continue on to the next trip
                 }
             }
+            if(timeStep > numberOfSegmentsInADay)
+            {
+                throw new InvalidOperationException("There were more time steps emitted than there were time steps in the day!");
+            }
+            // Finish writing the data for the rest of the day
+            for (; timeStep < numberOfSegmentsInADay;)
+            {
+                EmitNothing();
+            }
 
             for (int i = 0; i < trips.Count; i++)
             {
                 // make sure the trip starts during the day
-                if (trips[i].Origin != trips[i].Destination && trips[i].TripStart < 24 * 60)
+                if (trips[i].Origin != trips[i].Destination && trips[i].TripStartTime < 24 * 60)
                 {
-                    writer.Write("|labels ");
-                    for (int j = 0; j < numberOfModes; j++)
+                    writer.Append("|labels ");
+                    if (applyODInsteadOfMode)
                     {
-                        writer.Write(j == trips[i].Mode ? "1 " : "0 ");
+                        writer.Append(trips[i].Origin);
+                        writer.Append(' ');
+                        writer.Append(trips[i].Destination);
+                        writer.Append(' ');
+                        writer.Append(trips[i].TripStartTime);
+                        writer.Append(' ');
                     }
-                    writer.Write(mainFeatures.ToString());
+                    else
+                    { 
+                        for (int j = 0; j < numberOfModes; j++)
+                        {
+                            writer.Append(j == trips[i].Mode ? "1 " : "0 ");
+                        }
+                    }
+                    writer.Append(mainFeatures);
                     // write out the trip specific data (1 if the activity is occurring)
                     for (int j = 0; j < numberOfSegmentsInADay; j++)
                     {
-                        writer.Write(trips[i].TripStart <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? "1 " : "0 ");
+                        writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? "1 " : "0 ");
                     }
-                    writer.WriteLine();
+                    writer.AppendLine();
                 }
             }
+            return writer;
         }
     }
 }

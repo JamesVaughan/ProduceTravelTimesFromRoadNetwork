@@ -72,8 +72,9 @@ namespace ConvertCellTraces
         static void Main(string[] args)
         {
             var zones = Zone.LoadZones(@"G:\TMG\Research\Montevideo\NeuralNetwork\Zones.csv");
-            using (var writer = new StreamWriter("RealTraces.txt"))
+            using (var writer = new StreamWriter("RealTraces.csv"))
             {
+                WriteHeaders(writer);
                 var traceFiles = GetFilesToParse();
                 foreach (var traceFile in traceFiles)
                 {
@@ -141,7 +142,7 @@ namespace ConvertCellTraces
                                 distanceInTime[i] = Math.Min(distanceInTime[i], 1.0f);
                             }
                             // Pass 3, Write out all of the trips as traces if they are not intrazonal
-                            var distancesAsString = String.Join(' ', distanceInTime);
+                            var distancesAsString = String.Join(',', distanceInTime);
                             foreach(var step in personDay.Steps)
                             {
                                 if(step.Type == "trip")
@@ -163,13 +164,12 @@ namespace ConvertCellTraces
                                             continue;
                                         }
                                         // origin, destination, startTime
-                                        writer.Write("|labels ");
                                         writer.Write(step.Origin);
-                                        writer.Write(' ');
+                                        writer.Write(',');
                                         writer.Write(step.Destination);
-                                        writer.Write(' ');
+                                        writer.Write(',');
                                         writer.Write(originTime);
-                                        writer.Write(" |features ");
+                                        writer.Write(",");
                                         writer.Write(distancesAsString);
                                         
                                         // make sure the destination bin at least ends at the end of the day
@@ -178,7 +178,7 @@ namespace ConvertCellTraces
                                         for (int i = 0; i < 24 * 12; i++)
                                         {
                                             // for each time bin
-                                            writer.Write(' ');
+                                            writer.Write(',');
                                             writer.Write(originBin <= i && i <= destinationBin ? '1' : '0');
                                         }
                                         writer.WriteLine();
@@ -189,6 +189,23 @@ namespace ConvertCellTraces
                     }
                 }
             }
+        }
+
+        private static void WriteHeaders(StreamWriter writer)
+        {
+            var length = 24 * 12;
+            writer.Write("Origin,Destination,StartTime");
+            for (int i = 0; i < length; i++)
+            {
+                writer.Write(",Distance");
+                writer.Write(i);
+            }
+            for (int i = 0; i < length; i++)
+            {
+                writer.Write(",Active");
+                writer.Write(i);
+            }
+            writer.WriteLine();
         }
 
         private static float ComputeDistance(Zone previousZone, Zone hopZone)

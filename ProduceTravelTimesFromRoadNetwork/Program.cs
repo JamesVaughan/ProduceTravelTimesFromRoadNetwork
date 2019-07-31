@@ -11,6 +11,30 @@ namespace ProduceTravelTimesFromRoadNetwork
 {
     class Program
     {
+        private static void WriteHeaders(StreamWriter writer, bool applyOD)
+        {
+            var length = 24 * 12;
+            if (applyOD)
+            {
+                writer.Write("Origin,Destination,StartTime");
+            }
+            else
+            {
+                writer.Write("AutoMode,TransitMode,ActiveMode");
+            }
+            for (int i = 0; i < length; i++)
+            {
+                writer.Write(",Distance");
+                writer.Write(i);
+            }
+            for (int i = 0; i < length; i++)
+            {
+                writer.Write(",Active");
+                writer.Write(i);
+            }
+            writer.WriteLine();
+        }
+
         static void Main(string[] args)
         {
             // Load Road Network
@@ -31,24 +55,47 @@ namespace ProduceTravelTimesFromRoadNetwork
             stopwatch.Stop();
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
-            /*
-            using (StreamWriter writer = new StreamWriter("SyntheticCellTraces.txt"))
-            using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest.txt"))
+
+            WriteSurveyData(networks);
+            WriteRealTraces(networkAM, networks);
+        }
+
+        private static void WriteSurveyData(Network[] networks)
+        {
+            using (StreamWriter writer = new StreamWriter("SyntheticCellTraces.csv"))
+            using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest.csv"))
             {
+                WriteHeaders(writer, false);
+                WriteHeaders(writer2, false);
                 bool first = true;
+                StringBuilder builder = new StringBuilder();
+                StringBuilder builder2 = new StringBuilder();
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
                 {
-                    WriteRecordsFor(first ? writer : writer2, networks, personRecord, false);
+                    RecordsFor(builder, builder2, networks, personRecord, false);
+                    if (first)
+                    {
+                        writer.WriteLine(builder);
+                    }
+                    else
+                    {
+                        writer2.WriteLine(builder);
+                    }
                     first = !first;
+                    builder.Clear();
+                    builder2.Clear();
                 }
             }
-            */
+        }
 
+        private static void WriteRealTraces(Network networkAM, Network[] networks)
+        {
             ConcurrentQueue<StringBuilder> builderPool = new ConcurrentQueue<StringBuilder>();
 
-            using (StreamWriter writer = new StreamWriter("ReadCellTraces.txt"))
+            using (StreamWriter writer = new StreamWriter("ReadCellTraces.csv"))
             {
-                foreach(var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv")
+                WriteHeaders(writer, true);
+                foreach (var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv")
                     .AsParallel()
                     .Select(personRecord => CleanPersonRecord(networkAM, personRecord))
                     .Select(personRecord =>
@@ -85,7 +132,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     {
                         writer?.Write(toWrite);
                     }
-                    if(builderPool.Count < Environment.ProcessorCount * 2)
+                    if (builderPool.Count < Environment.ProcessorCount * 2)
                     {
                         builderPool.Enqueue(toWrite);
                     }
@@ -129,19 +176,19 @@ namespace ProduceTravelTimesFromRoadNetwork
             const int pmStart = 15 * 12;
             const int evStart = 19 * 12;
             // if it is before the PM
-            if(timeSlice < pmStart)
+            if (timeSlice < pmStart)
             {
-                if(timeSlice < amStart)
+                if (timeSlice < amStart)
                 {
                     return 3;
                 }
-                if(timeSlice < mdStart)
+                if (timeSlice < mdStart)
                 {
                     return 0;
                 }
                 return 1;
             }
-            if(timeSlice < evStart)
+            if (timeSlice < evStart)
             {
                 return 2;
             }
@@ -170,16 +217,15 @@ namespace ProduceTravelTimesFromRoadNetwork
             var currentZone = network[0].GetZone(entry.Trips[0].Origin);
             void EmitNothing()
             {
-                mainFeatures.Append("0 ");
+                mainFeatures.Append(",0");
                 timeStep++;
             }
             void emitDistance(float distance)
             {
+                mainFeatures.Append(',');
                 mainFeatures.Append(Math.Min(1.0f, distance / 100000f));
-                mainFeatures.Append(' ');
                 timeStep++;
             }
-            mainFeatures.Append("|features ");
             for (int i = 0; i < trips.Count; i++)
             {
                 var startTime = (int)Math.Round(trips[i].TripStartTime, 0) / minutesPerTimeStep;
@@ -386,7 +432,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     // just continue on to the next trip
                 }
             }
-            if(timeStep > numberOfSegmentsInADay)
+            if (timeStep > numberOfSegmentsInADay)
             {
                 throw new InvalidOperationException("There were more time steps emitted than there were time steps in the day!");
             }
@@ -401,28 +447,33 @@ namespace ProduceTravelTimesFromRoadNetwork
                 // make sure the trip starts during the day
                 if (trips[i].Origin != trips[i].Destination && trips[i].TripStartTime < 24 * 60)
                 {
-                    writer.Append("|labels ");
                     if (applyODInsteadOfMode)
                     {
                         writer.Append(trips[i].Origin);
-                        writer.Append(' ');
+                        writer.Append(',');
                         writer.Append(trips[i].Destination);
-                        writer.Append(' ');
+                        writer.Append(',');
                         writer.Append(trips[i].TripStartTime);
-                        writer.Append(' ');
                     }
                     else
-                    { 
+                    {
                         for (int j = 0; j < numberOfModes; j++)
                         {
-                            writer.Append(j == trips[i].Mode ? "1 " : "0 ");
+                            if (j == 0)
+                            {
+                                writer.Append(j == trips[i].Mode ? "1" : "0");
+                            }
+                            else
+                            {
+                                writer.Append(j == trips[i].Mode ? ",1" : ",0");
+                            }
                         }
                     }
                     writer.Append(mainFeatures);
                     // write out the trip specific data (1 if the activity is occurring)
                     for (int j = 0; j < numberOfSegmentsInADay; j++)
                     {
-                        writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? "1 " : "0 ");
+                        writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? ",1" : ",0");
                     }
                     writer.AppendLine();
                 }

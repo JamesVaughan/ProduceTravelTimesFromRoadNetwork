@@ -20,7 +20,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
             else
             {
-                writer.Write("AutoMode,TransitMode,ActiveMode");
+                writer.Write("Result");
             }
             for (int i = 0; i < length; i++)
             {
@@ -57,7 +57,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
 
             WriteSurveyData(networks);
-            WriteRealTraces(networkAM, networks);
+            //WriteRealTraces(networkAM, networks);
         }
 
         private static void WriteSurveyData(Network[] networks)
@@ -75,11 +75,11 @@ namespace ProduceTravelTimesFromRoadNetwork
                     RecordsFor(builder, builder2, networks, personRecord, false);
                     if (first)
                     {
-                        writer.WriteLine(builder);
+                        writer.Write(builder);
                     }
                     else
                     {
-                        writer2.WriteLine(builder);
+                        writer2.Write(builder);
                     }
                     first = !first;
                     builder.Clear();
@@ -457,17 +457,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     }
                     else
                     {
-                        for (int j = 0; j < numberOfModes; j++)
-                        {
-                            if (j == 0)
-                            {
-                                writer.Append(j == trips[i].Mode ? "1" : "0");
-                            }
-                            else
-                            {
-                                writer.Append(j == trips[i].Mode ? ",1" : ",0");
-                            }
-                        }
+                        writer.Append(trips[i].Mode);
                     }
                     writer.Append(mainFeatures);
                     // write out the trip specific data (1 if the activity is occurring)

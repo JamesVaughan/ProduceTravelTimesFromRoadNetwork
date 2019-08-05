@@ -4,8 +4,8 @@ from tensorflow import keras
 import functools
 import os
 
+EPOCHES = 5
 
-EPOCHES = 20
 
 MEANS = []
 
@@ -24,8 +24,8 @@ LABEL_COLUMN = 'Result'
 LABELS = [0, 1, 2]
 
 
-raw_train_data = tf.data.experimental.make_csv_dataset(r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTraces.csv", 25
-                                                       ,columns, label_name="Result", num_epochs= EPOCHES, ignore_errors = True)
+raw_train_data = tf.data.experimental.make_csv_dataset(r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTraces.csv",
+                                                       25, columns, label_name="Result", num_epochs= EPOCHES, ignore_errors = True)
 
 # Process Categories
 categorical_columns = []
@@ -44,34 +44,61 @@ for i in range(len(MEANS)):
   num_col = tf.feature_column.numeric_column(MEANS[i][0], normalizer_fn=functools.partial(process_continuous_data, MEANS[i][1]))
   numerical_columns.append(num_col)
 
-preprocessing_layer = tf.keras.layers.DenseFeatures(numerical_columns)
+raw_test_data = tf.data.experimental.make_csv_dataset(r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTracesTest.csv",
+                25, columns, field_delim=',', label_name="Result", num_epochs= EPOCHES, ignore_errors = True)
 
-# We need at least two layers in order to work with XOR
-model = tf.keras.models.Sequential([
-  #tf.keras.layers.Flatten(input_shape=(28, 28)),
-  preprocessing_layer,
-  tf.keras.layers.Dense(128, activation='relu'),
-  tf.keras.layers.Dropout(0.2),
-  tf.keras.layers.Dense(128, activation='relu'),
-  tf.keras.layers.Dropout(0.2),
-  tf.keras.layers.Dense(3, activation='softmax')
-])
 
-model.compile(optimizer='adam',
-              loss='sparse_categorical_crossentropy', # Use this if you have more than one category
-              # loss='binary_crossentropy', # Use this if the answers are just true / false
-              metrics=['accuracy'])
+layers_to_test = [1, 2, 3, 4, 5]
+width_to_test = [32, 64, 128, 256, 512, 1024]
+dropout_to_test = [0.05, 0.1, 0.15, 0.2, 0.25]
 
-train_data = raw_train_data.shuffle(500)
+with open("MetaData","w") as writer:
+    writer.write("Epochs,LayerSize,Layers,Dropout,TrainAccuracy,TestAccuracy,TrainLoss,TestLoss\n")
 
-model.fit(train_data, epochs=EPOCHES)
+    for dropout in dropout_to_test:                   
+        for number_of_layers in layers_to_test:
+            for layer_size in width_to_test:
+    
+    
+                preprocessing_layer = tf.keras.layers.DenseFeatures(numerical_columns)
+                layers = [ preprocessing_layer ]
+    
+                for i in range(number_of_layers):
+                    layers.append(tf.keras.layers.Dense(layer_size, activation='relu'))
+                    layers.append(tf.keras.layers.Dropout(0.2))
+                
+                layers.append(keras.layers.Dense(3, activation='softmax'))
+                
+                
+                # We need at least two layers in order to work with XOR
+                model = tf.keras.models.Sequential(layers)
+                
+                model.compile(optimizer='adam',
+                              loss='sparse_categorical_crossentropy', # Use this if you have more than one category
+                              # loss='binary_crossentropy', # Use this if the answers are just true / false
+                              metrics=['accuracy'])
+                
+                train_data = raw_train_data.shuffle(500)
+                
+                model.fit(train_data, epochs=EPOCHES)
+                
+                model.save("ModeChoiceModel_" + str(EPOCHES) + "_" + str(number_of_layers) + "_" + str(layer_size) + "_" + str(dropout), True)
+                
 
-model.save("ModeChoiceModel", True)
+                print(model.summary())
+                
+                print ("Evaluating on the test dataset")
+                results_test_loss , results_test_acc = model.evaluate(raw_test_data)
+                print()
+                
+                print ("Evaluating on the training dataset")
+                results_train_loss , results_train_acc = model.evaluate(raw_train_data)
+                print()
 
-raw_test_data = tf.data.experimental.make_csv_dataset(r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTracesTest.csv", 5,
-                                                     columns, field_delim=',', label_name="Result", num_epochs= EPOCHES, ignore_errors = True)
-test_data = raw_test_data
-model.evaluate(test_data)
+                writer.write(str(EPOCHES) + "," + str(layer_size) + "," + str(number_of_layers) + "," + str(dropout) + ","  +\
+                             str(results_train_acc) + "," + str(results_test_acc) + "," + str(results_train_loss) + "," + str(results_test_loss) + "\n")
 
-print(model.summary())
+
+    
+    
 

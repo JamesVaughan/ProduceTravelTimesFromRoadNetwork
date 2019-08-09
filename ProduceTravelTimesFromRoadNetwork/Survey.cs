@@ -98,7 +98,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
         }
 
-        public static IEnumerable<SurveyEntry> EnumerateCellTraces(Network am, string stepFilePath)
+        public static IEnumerable<SurveyEntry> EnumerateCellTraces(Network am, string stepFilePath, Dictionary<int, DensityData> densityData)
         {
             Random r = new Random();
             using (var reader = new CsvReader(stepFilePath))

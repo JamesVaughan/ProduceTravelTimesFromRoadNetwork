@@ -41,7 +41,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.Write("Loading Networks...");
             Stopwatch stopwatch = Stopwatch.StartNew();
             Network networkAM = null, networkMD = null, networkPM = null, networkEV = null;
-
+            Dictionary<int, DensityData> densityData = null;
             Parallel.Invoke(
                 () => networkAM = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\AM.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
                                         , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsAM.txt"),
@@ -50,17 +50,18 @@ namespace ProduceTravelTimesFromRoadNetwork
                 () => networkPM = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\PM.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
                                         , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsPM.txt"),
                 () => networkEV = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\EV.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
-                                        , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsEV.txt")
+                                        , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsEV.txt"),
+                () => densityData = DensityData.LoadDensityData(@"G:\TMG\Research\Montevideo\Cell data\AntelZoneData.csv")
             );
             stopwatch.Stop();
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
 
-            WriteSurveyData(networks);
+            WriteSurveyData(networks, densityData);
             //WriteRealTraces(networkAM, networks);
         }
 
-        private static void WriteSurveyData(Network[] networks)
+        private static void WriteSurveyData(Network[] networks, Dictionary<int, DensityData> densityData)
         {
             using (StreamWriter writer = new StreamWriter("SyntheticCellTraces.csv"))
             using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest.csv"))
@@ -72,7 +73,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                 StringBuilder builder2 = new StringBuilder();
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
                 {
-                    RecordsFor(builder, builder2, networks, personRecord, false);
+                    RecordsFor(builder, builder2, networks, personRecord, false, densityData);
                     if (first)
                     {
                         writer.Write(builder);
@@ -88,14 +89,14 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
         }
 
-        private static void WriteRealTraces(Network networkAM, Network[] networks)
+        private static void WriteRealTraces(Network networkAM, Network[] networks, Dictionary<int, DensityData> densityData)
         {
             ConcurrentQueue<StringBuilder> builderPool = new ConcurrentQueue<StringBuilder>();
 
             using (StreamWriter writer = new StreamWriter("ReadCellTraces.csv"))
             {
                 WriteHeaders(writer, true);
-                foreach (var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv")
+                foreach (var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv", densityData)
                     .AsParallel()
                     .Select(personRecord => CleanPersonRecord(networkAM, personRecord))
                     .Select(personRecord =>
@@ -207,7 +208,6 @@ namespace ProduceTravelTimesFromRoadNetwork
             const int minutesPerTimeStep = 5;
             // km/minute
             const float walkSpeed = 4.0f / 60.0f;
-            const int numberOfModes = 3;
             const int numberOfSegmentsInADay = (60 * 24) / minutesPerTimeStep;
             // return back the empty buffer
             if (entry.Trips.Count <= 0)
@@ -465,6 +465,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                     {
                         writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? ",1" : ",0");
                     }
+                    // Write out the density variables for origin then destination (population,employment,household)
+                    
                     writer.AppendLine();
                 }
             }

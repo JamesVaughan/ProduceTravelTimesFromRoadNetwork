@@ -32,6 +32,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                 writer.Write(",Active");
                 writer.Write(i);
             }
+            writer.Write(",OriginPopulationDensity,OriginEmploymentDensity,OriginHouseholdDensity");
+            writer.Write(",DestinationPopulationDensity,DestinationEmploymentDensity,DestinationHouseholdDensity");
             writer.WriteLine();
         }
 
@@ -57,8 +59,8 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
 
-            WriteSurveyData(networks, densityData);
-            //WriteRealTraces(networkAM, networks);
+            //WriteSurveyData(networks, densityData);
+            WriteRealTraces(networkAM, networks, densityData);
         }
 
         private static void WriteSurveyData(Network[] networks, Dictionary<int, DensityData> densityData)
@@ -118,7 +120,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         {
                             buffer2.Clear();
                         }
-                        var ret = RecordsFor(buffer, buffer2, networks, personRecord, true);
+                        var ret = RecordsFor(buffer, buffer2, networks, personRecord, true, densityData);
                         // return back our temporary buffer
                         if (builderPool.Count < Environment.ProcessorCount * 2)
                         {
@@ -196,7 +198,8 @@ namespace ProduceTravelTimesFromRoadNetwork
             return 3;
         }
 
-        static StringBuilder RecordsFor(StringBuilder writer, StringBuilder mainFeatures, Network[] network, SurveyEntry entry, bool applyODInsteadOfMode)
+        static StringBuilder RecordsFor(StringBuilder writer, StringBuilder mainFeatures, Network[] network, SurveyEntry entry, bool applyODInsteadOfMode,
+            Dictionary<int, DensityData> densityData)
         {
             /*
              * Step 1) Find nextTrip
@@ -214,7 +217,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             {
                 return writer;
             }
-            var currentZone = network[0].GetZone(entry.Trips[0].Origin);
+            int currentZone;
             void EmitNothing()
             {
                 mainFeatures.Append(",0");
@@ -466,7 +469,32 @@ namespace ProduceTravelTimesFromRoadNetwork
                         writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? ",1" : ",0");
                     }
                     // Write out the density variables for origin then destination (population,employment,household)
-                    
+                    if(densityData.TryGetValue(network[0].GetZone(entry.Trips[i].Origin), out var originDensity))
+                    {
+                        writer.Append(',');
+                        writer.Append(originDensity.PopulationDensity);
+                        writer.Append(',');
+                        writer.Append(originDensity.EmploymentDensity);
+                        writer.Append(',');
+                        writer.Append(originDensity.HouseholdDensity);
+                    }
+                    else
+                    {
+                        writer.Append(",0,0,0");
+                    }
+                    if (densityData.TryGetValue(network[0].GetZone(entry.Trips[i].Destination), out var densityDensity))
+                    {
+                        writer.Append(',');
+                        writer.Append(densityDensity.PopulationDensity);
+                        writer.Append(',');
+                        writer.Append(densityDensity.EmploymentDensity);
+                        writer.Append(',');
+                        writer.Append(densityDensity.HouseholdDensity);
+                    }
+                    else
+                    {
+                        writer.Append(",0,0,0");
+                    }
                     writer.AppendLine();
                 }
             }

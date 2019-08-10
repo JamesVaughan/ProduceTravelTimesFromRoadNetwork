@@ -11,6 +11,7 @@ MEANS = []
 
 # Create Columns
 columns = ['Result']
+
 for i in range(288):
     name = 'Distance' + str(i)
     columns.append(name)
@@ -19,13 +20,17 @@ for i in range(288):
     name = 'Active' + str(i)
     columns.append(name)
     MEANS.append((name, 0.5))
+for i in ['OriginPopulationDensity', 'OriginEmploymentDensity','OriginHouseholdDensity','DestinationPopulationDensity','DestinationEmploymentDensity','DestinationHouseholdDensity']:
+    name = i
+    columns.append(name)
+    MEANS.append((name, 1000))
 
 LABEL_COLUMN = 'Result'
 LABELS = [0, 1, 2]
 
 
 raw_train_data = tf.data.experimental.make_csv_dataset(r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTraces.csv",
-                                                       25, columns, label_name="Result", num_epochs= EPOCHES, ignore_errors = True)
+                                                       25, columns, label_name=LABEL_COLUMN, num_epochs= EPOCHES, ignore_errors = True)
 
 # Process Categories
 categorical_columns = []
@@ -45,14 +50,17 @@ for i in range(len(MEANS)):
   numerical_columns.append(num_col)
 
 raw_test_data = tf.data.experimental.make_csv_dataset(r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTracesTest.csv",
-                25, columns, field_delim=',', label_name="Result", num_epochs= EPOCHES, ignore_errors = True)
+                25, columns, field_delim=',', label_name=LABEL_COLUMN, num_epochs= EPOCHES, ignore_errors = True)
 
 
-layers_to_test = [1, 2, 3, 4, 5]
-width_to_test = [32, 64, 128, 256, 512, 1024]
-dropout_to_test = [0.05, 0.1, 0.15, 0.2, 0.25]
+layers_to_test = [2, 3, 4, 5]
+width_to_test = [32, 64, 128, 256]
+dropout_to_test = [0.2]
 
-with open("MetaData","w") as writer:
+if not os.path.exists("Models"):
+    os.makedirs("Models")
+
+with open("Models/MetaData.csv","w") as writer:
     writer.write("Epochs,LayerSize,Layers,Dropout,TrainAccuracy,TestAccuracy,TrainLoss,TestLoss\n")
 
     for dropout in dropout_to_test:                   
@@ -81,8 +89,10 @@ with open("MetaData","w") as writer:
                 train_data = raw_train_data.shuffle(500)
                 
                 model.fit(train_data, epochs=EPOCHES)
-                
-                model.save("ModeChoiceModel_" + str(EPOCHES) + "_" + str(number_of_layers) + "_" + str(layer_size) + "_" + str(dropout), True)
+                dir_name = "Models/ModeChoiceModel_" + str(EPOCHES) + "_" + str(number_of_layers) + "_" + str(layer_size) + "_" + str(dropout)
+                if not os.path.exists(dir_name):
+                    os.makedirs(dir_name)
+                model.save(dir_name, True)
                 
 
                 print(model.summary())

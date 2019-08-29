@@ -9,6 +9,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ConvertCellTraces", "Conver
 EndProject
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "EstimateModeChoiceModel", "EstimateModeChoiceModel\EstimateModeChoiceModel.pyproj", "{BDCC2236-9AED-4409-9EBB-26E5AD268E44}"
 EndProject
+Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "ExecuteModeChoiceModel", "ExecuteModeChoiceModel\ExecuteModeChoiceModel.pyproj", "{061113DB-D843-4D76-9451-E2A4D68CAB43}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -25,6 +27,8 @@ Global
 		{4CCD7164-7D86-46A2-A675-71586F93FDD0}.Release|Any CPU.Build.0 = Release|Any CPU
 		{BDCC2236-9AED-4409-9EBB-26E5AD268E44}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{BDCC2236-9AED-4409-9EBB-26E5AD268E44}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{061113DB-D843-4D76-9451-E2A4D68CAB43}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{061113DB-D843-4D76-9451-E2A4D68CAB43}.Release|Any CPU.ActiveCfg = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

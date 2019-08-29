@@ -34,6 +34,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
             writer.Write(",OriginPopulationDensity,OriginEmploymentDensity,OriginHouseholdDensity");
             writer.Write(",DestinationPopulationDensity,DestinationEmploymentDensity,DestinationHouseholdDensity");
+            writer.Write(",TripDistance");
             writer.WriteLine();
         }
 
@@ -59,24 +60,26 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
 
-            //WriteSurveyData(networks, densityData);
-            WriteRealTraces(networkAM, networks, densityData);
+            WriteSurveyData(networks, densityData);
+            //WriteRealTraces(networkAM, networks, densityData);
         }
 
         private static void WriteSurveyData(Network[] networks, Dictionary<int, DensityData> densityData)
         {
+            var rand = new Random(123456);
             using (StreamWriter writer = new StreamWriter("SyntheticCellTraces.csv"))
             using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest.csv"))
             {
                 WriteHeaders(writer, false);
                 WriteHeaders(writer2, false);
-                bool first = true;
+                uint count = 0;
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
                 {
                     RecordsFor(builder, builder2, networks, personRecord, false, densityData);
-                    if (first)
+                    // 80% of the records will be stored in the training set
+                    if (rand.NextDouble() < 0.8)
                     {
                         writer.Write(builder);
                     }
@@ -84,7 +87,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     {
                         writer2.Write(builder);
                     }
-                    first = !first;
+                    count++;
                     builder.Clear();
                     builder2.Clear();
                 }
@@ -495,10 +498,18 @@ namespace ProduceTravelTimesFromRoadNetwork
                     {
                         writer.Append(",0,0,0");
                     }
+                    // write the total distance of the trip
+                    writer.Append(',');
+                    writer.Append(TripDistance(network[0], entry.Trips[i]));
                     writer.AppendLine();
                 }
             }
             return writer;
+        }
+
+        private static float TripDistance(Network network, TripEntry tripEntry)
+        {
+            return network.ComputeDistance(tripEntry.Origin, tripEntry.Destination);
         }
     }
 }

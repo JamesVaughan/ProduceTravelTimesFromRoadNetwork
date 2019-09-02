@@ -23,13 +23,19 @@ namespace ProduceTravelTimesFromRoadNetwork
         /// <summary>
         /// Time of day in minutes from midnight
         /// </summary>
-        public readonly int TimeOfDay;
+        public readonly int StartTimeOfDay;
 
-        private TransitData(int originNode, int destinationNode, string timeString)
+        /// <summary>
+        /// Time of day in minutes from midnight
+        /// </summary>
+        public readonly int EndTimeOfDay;
+
+        private TransitData(int originNode, int destinationNode, string startTime, string endTime)
         {
             OriginNode = originNode;
             DestinationNode = destinationNode;
-            TimeOfDay = ConvertTimeToMinutesFromMidnight(timeString);
+            StartTimeOfDay = ConvertTimeToMinutesFromMidnight(startTime);
+            EndTimeOfDay = ConvertTimeToMinutesFromMidnight(endTime);
         }
 
         private static int ConvertTimeToMinutesFromMidnight(string timeString)
@@ -44,7 +50,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     count++;
                 }
             }
-            // find the next space
+            // find the first space
             for (; i < timeString.Length && timeString[i] == ' '; i++) { }
             int ret = 0;
             // Read the hours
@@ -62,9 +68,10 @@ namespace ProduceTravelTimesFromRoadNetwork
             const int userID = 2;
             const int accessNode = 6;
             const int egressNode = 13;
-            const int timeOfDay = 5;
+            const int startTimeOfDay = 5;
+            const int endTimeOfDay = 12;
             // convert survey data
-            using(var reader = new StreamReader(surveyPath))
+            using (var reader = new StreamReader(surveyPath))
             {
                 // burn header
                 reader.ReadLine();
@@ -78,7 +85,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                         yield return (parts[userID], new TransitData(
                             stopToNode[int.Parse(parts[accessNode])],
                             stopToNode[int.Parse(parts[egressNode])],
-                            parts[timeOfDay]));
+                            parts[startTimeOfDay],
+                            parts[endTimeOfDay]));
                     }
                 }
             }

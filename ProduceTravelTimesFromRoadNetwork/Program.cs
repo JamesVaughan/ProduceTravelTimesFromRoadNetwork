@@ -68,12 +68,48 @@ namespace ProduceTravelTimesFromRoadNetwork
         private static void WriteTransitSurveydata(Network[] networks, Dictionary<int, DensityData> densityData)
         {
             var rand = new Random(123546);
-
-            foreach(var personRecord in TransitData.StreamTransitRiderDays(@"G:\TMG\Research\Montevideo\NewTransitData\2018.12.04\od_may_2018_vero.csv", TransitData.LoadStopToStop(
-                @"G:\TMG\Research\Montevideo\BusNetwork\BusStopsEmmeIDmapping.csv")))
+            using (StreamWriter writer = new StreamWriter("SyntheticCellTraces-Transit.csv"))
+            using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest-Transit.csv"))
             {
-                
+                // Write the headers for both streams
+                WriteHeaders(writer, false); WriteHeaders(writer2, false);
+                StringBuilder builder = new StringBuilder();
+                StringBuilder builder2 = new StringBuilder();
+                foreach (var personRecord in TransitData.StreamTransitRiderDays(@"G:\TMG\Research\Montevideo\NewTransitData\2018.12.04\od_may_2018_vero.csv", TransitData.LoadStopToStop(
+                @"G:\TMG\Research\Montevideo\BusNetwork\BusStopsEmmeIDmapping.csv")))
+                {
+                    // Convert into a survey entry
+                    SurveyEntry entry = new SurveyEntry();
+                    for (int i = 0; i < personRecord.Count; i++)
+                    {
+                        entry.Add(new TripEntry()
+                        {
+                            Origin = GetStopCentroid(networks, personRecord[i].OriginNode, personRecord[i].StartTimeOfDay),
+                            Destination = GetStopCentroid(networks, personRecord[i].DestinationNode, personRecord[i].StartTimeOfDay),
+                            Mode = 1,
+                            TripStartTime = (float)personRecord[i].StartTimeOfDay,
+                            TripEndTime = (float)personRecord[i].EndTimeOfDay
+                        });
+                    }
+                    RecordsFor(builder, builder2, networks, entry, false, densityData);
+                    // 80% of the records will be stored in the training set
+                    if (rand.NextDouble() < 0.8)
+                    {
+                        writer.Write(builder);
+                    }
+                    else
+                    {
+                        writer2.Write(builder);
+                    }
+                    builder.Clear();
+                    builder2.Clear();
+                }
             }
+        }
+
+        private static int GetStopCentroid(Network[] networks, int stopNode, int timeOfDay)
+        {
+            return 0;
         }
 
         private static void WriteSurveyData(Network[] networks, Dictionary<int, DensityData> densityData)

@@ -60,8 +60,20 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV };
 
-            WriteSurveyData(networks, densityData);
-            //WriteRealTraces(networkAM, networks, densityData);
+            // WriteSurveyData(networks, densityData);
+            WriteTransitSurveydata(networks, densityData);
+            // WriteRealTraces(networkAM, networks, densityData);
+        }
+
+        private static void WriteTransitSurveydata(Network[] networks, Dictionary<int, DensityData> densityData)
+        {
+            var rand = new Random(123546);
+
+            foreach(var personRecord in TransitData.StreamTransitRiderDays(@"G:\TMG\Research\Montevideo\NewTransitData\2018.12.04\od_may_2018_vero.csv", TransitData.LoadStopToStop(
+                @"G:\TMG\Research\Montevideo\BusNetwork\BusStopsEmmeIDmapping.csv")))
+            {
+                
+            }
         }
 
         private static void WriteSurveyData(Network[] networks, Dictionary<int, DensityData> densityData)

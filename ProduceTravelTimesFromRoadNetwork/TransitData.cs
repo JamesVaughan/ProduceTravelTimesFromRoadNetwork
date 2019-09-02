@@ -57,8 +57,12 @@ namespace ProduceTravelTimesFromRoadNetwork
             return ret;
         }
 
-        public static IEnumerator<TransitData> StreamTransitData(string surveyPath, Dictionary<int, int> stopToNode)
+        public static IEnumerable<(string userId, TransitData trip)> StreamTransitData(string surveyPath, Dictionary<int, int> stopToNode)
         {
+            const int userID = 2;
+            const int accessNode = 6;
+            const int egressNode = 13;
+            const int timeOfDay = 5;
             // convert survey data
             using(var reader = new StreamReader(surveyPath))
             {
@@ -69,25 +73,62 @@ namespace ProduceTravelTimesFromRoadNetwork
                 {
                     var parts = line.Split(',');
                     // if we have a valid line
-                    if(parts.Length >= 29 && parts[2] == "e-payment")
+                    if(parts.Length >= 29 && parts[2] != "sin_tarjeta")
                     {
-                        yield return new TransitData(
-                            stopToNode[int.Parse(parts[6])],
-                            stopToNode[int.Parse(parts[13])],
-                            parts[5]);
+                        yield return (parts[userID], new TransitData(
+                            stopToNode[int.Parse(parts[accessNode])],
+                            stopToNode[int.Parse(parts[egressNode])],
+                            parts[timeOfDay]));
                     }
                 }
             }
         }
 
-        public static IEnumerator<List<TransitData>> StreamTransitRiderDays(string surveyPath, Dictionary<int, int> stopToNode)
+        public static IEnumerable<List<TransitData>> StreamTransitRiderDays(string surveyPath, Dictionary<int, int> stopToNode)
         {
-            /*int previousUser = -1;
-            bool any = false;
-            var ret = new 
-            */
-            return null;
+            string previousUser = null;
+            List<TransitData> ret = null;
+            foreach(var trip in StreamTransitData(surveyPath, stopToNode))
+            {
+                if(trip.userId != previousUser)
+                {
+                    if(previousUser != null)
+                    {
+                        yield return ret;
+                    }
+                    ret = new List<TransitData>(4);
+                    previousUser = trip.userId;
+                }
+            }
+            if(ret != null)
+            {
+                yield return ret;
+            }
         }
 
+        /// <summary>
+        /// Load in the mapping for stop numbers from the survey mapping them to the nodes in the EMME network.
+        /// </summary>
+        /// <param name="filePath">The file path to load in the stop data from.</param>
+        /// <returns>A dictionary that maps stops from survey to EMME network nodes.</returns>
+        public static Dictionary<int, int> LoadStopToStop(string filePath)
+        {
+            var ret = new Dictionary<int, int>();
+            using(var reader = new StreamReader(filePath))
+            {
+                string line;
+                // burn header
+                reader.ReadLine();
+                while((line = reader.ReadLine()) != null)
+                {
+                    var parts = line.Split(',');
+                    if(parts.Length >= 2)
+                    {
+                        ret[int.Parse(parts[0])] = int.Parse(parts[1]);
+                    }
+                }
+            }
+            return ret;
+        }
     }
 }

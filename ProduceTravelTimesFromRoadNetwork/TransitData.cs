@@ -13,22 +13,22 @@ namespace ProduceTravelTimesFromRoadNetwork
         /// <summary>
         /// The origin node
         /// </summary>
-        public readonly int OriginNode;
+        public int OriginNode { get; private set; }
 
         /// <summary>
         /// The destination node
         /// </summary>
-        public readonly int DestinationNode;
+        public int DestinationNode { get; private set; }
 
         /// <summary>
         /// Time of day in minutes from midnight
         /// </summary>
-        public readonly int StartTimeOfDay;
+        public int StartTimeOfDay { get; private set; }
 
         /// <summary>
         /// Time of day in minutes from midnight
         /// </summary>
-        public readonly int EndTimeOfDay;
+        public int EndTimeOfDay { get; private set; }
 
         private TransitData(int originNode, int destinationNode, string startTime, string endTime)
         {
@@ -51,13 +51,13 @@ namespace ProduceTravelTimesFromRoadNetwork
                 }
             }
             // find the first space
-            for (; i < timeString.Length && timeString[i] == ' '; i++) { }
+            for (; i < timeString.Length && timeString[i] != ' '; i++) { }
             int ret = 0;
             // Read the hours
-            for (count = 0; i < timeString.Length && timeString[i] == ':'; i++, count++) { }
-            if (i < timeString.Length) ret = int.Parse(timeString.AsSpan(i - count, count)) * 60;
+            for (count = 0; i < timeString.Length && timeString[i] != ':'; i++, count++) { }
+            if (i < timeString.Length) ret = int.Parse(timeString.AsSpan(i++ - count, count)) * 60;
             // Read the minutes
-            for (count = 0; i < timeString.Length && timeString[i] == ':'; i++, count++) { }
+            for (count = 0; i < timeString.Length && timeString[i] != ':'; i++, count++) { }
             if (i < timeString.Length) ret += int.Parse(timeString.AsSpan(i - count, count));
             // Ignore seconds
             return ret;
@@ -82,9 +82,19 @@ namespace ProduceTravelTimesFromRoadNetwork
                     // if we have a valid line
                     if(parts.Length >= 29 && parts[2] != "sin_tarjeta")
                     {
+                        var originStop = int.Parse(parts[accessNode]);
+                        if (!stopToNode.TryGetValue(originStop, out var origin))
+                        {
+                            origin = -1;
+                        }
+                        var destStop = int.Parse(parts[egressNode]);
+                        if(!stopToNode.TryGetValue(destStop, out var destination))
+                        {
+                            destination = -1;
+                        }
                         yield return (parts[userID], new TransitData(
-                            stopToNode[int.Parse(parts[accessNode])],
-                            stopToNode[int.Parse(parts[egressNode])],
+                            origin,
+                            destination,
                             parts[startTimeOfDay],
                             parts[endTimeOfDay]));
                     }
@@ -92,25 +102,69 @@ namespace ProduceTravelTimesFromRoadNetwork
             }
         }
 
-        public static IEnumerable<List<TransitData>> StreamTransitRiderDays(string surveyPath, Dictionary<int, int> stopToNode)
+        public static IEnumerable<List<TransitData>> StreamTransitRiderDays(string surveyPath, Network network, Dictionary<int, int> stopToNode)
         {
             string previousUser = null;
             List<TransitData> ret = null;
+
+            bool correctRecords(List<TransitData> entry)
+            {
+                for (int i = 0; i < entry.Count; i++)
+                {
+                    // correct a bad origin
+                    if(entry[i].OriginNode < 0)
+                    {
+                        // we can not recover from a bad origin
+                        if(i == 0 || entry[i - 1].DestinationNode < 0)
+                        {
+                            return false;
+                        }
+                        // Correct it with the stop node from the previous valid destination
+                        entry[i].OriginNode = entry[i - 1].DestinationNode;
+                    }
+                    // correct bad stop zones
+                    if(entry[i].DestinationNode < 0)
+                    {
+                        if(i < entry.Count -1)
+                        {
+                            entry[i].DestinationNode = entry[i + 1].OriginNode;
+                        }
+                        return false;
+                    }
+                    if(!network.HasNode(entry[i].OriginNode))
+                    {
+                        return false;
+                    }
+                    if (!network.HasNode(entry[i].DestinationNode))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
             foreach(var trip in StreamTransitData(surveyPath, stopToNode))
             {
                 if(trip.userId != previousUser)
                 {
                     if(previousUser != null)
                     {
-                        yield return ret;
+                        if (correctRecords(ret))
+                        {
+                            yield return ret;
+                        }
                     }
                     ret = new List<TransitData>(4);
                     previousUser = trip.userId;
                 }
+                ret.Add(trip.trip);
             }
             if(ret != null)
             {
-                yield return ret;
+                if (correctRecords(ret))
+                {
+                    yield return ret;
+                }
             }
         }
 

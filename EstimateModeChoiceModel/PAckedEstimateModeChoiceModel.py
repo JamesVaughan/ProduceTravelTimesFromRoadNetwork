@@ -2,7 +2,7 @@
 EPOCHES = 300 # This is a maximum number, not the number required
 BATCH_SIZE = 128
 layers_to_test = [3]
-width_to_test = [100]
+width_to_test = [64]
 dropout_to_test = [0.5] #[0.2, 0.3, 0.4]
 l2_to_test = [0.0025]
 train_file_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\SyntheticCellTraces.csv"

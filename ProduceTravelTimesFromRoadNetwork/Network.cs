@@ -201,7 +201,13 @@ namespace ProduceTravelTimesFromRoadNetwork
             {
                 return 0f;
             }
-            return _links[(origin, destination)].Distance;
+            // See if the two nodes are connected
+            if (_links.TryGetValue((origin, destination), out var link))
+            {
+                return link.Distance;
+            }
+            // if the links are not connected, use a straight line distance between the two points.
+            return ComputeDistance(origin, destination);
         }
 
         private static void LoadNodes(ZipArchiveEntry nodeArchive, Network network, List<(int, IGeometry)> zones)
@@ -496,6 +502,11 @@ namespace ProduceTravelTimesFromRoadNetwork
                     }
                 }
             }
+        }
+
+        internal bool HasNode(int node)
+        {
+            return _nodes.ContainsKey(node);
         }
 
         private static int GetZoneNumber(float x, float y, List<(int zoneNumber, IGeometry geometry)> zones)

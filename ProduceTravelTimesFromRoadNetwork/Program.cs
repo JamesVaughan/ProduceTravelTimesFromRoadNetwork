@@ -72,7 +72,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest-Transit.csv"))
             {
                 // Write the headers for both streams
-                WriteHeaders(writer, false); WriteHeaders(writer2, false);
+                // WriteHeaders(writer, false); WriteHeaders(writer2, false);
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
                 foreach (var personRecord in TransitData.StreamTransitRiderDays(@"G:\TMG\Research\Montevideo\NewTransitData\2018.12.04\od_may_2018_vero.csv", networks[0], TransitData.LoadStopToStop(
@@ -120,8 +120,8 @@ namespace ProduceTravelTimesFromRoadNetwork
             using (StreamWriter writer = new StreamWriter("SyntheticCellTraces.csv"))
             using (StreamWriter writer2 = new StreamWriter("SyntheticCellTracesTest.csv"))
             {
-                WriteHeaders(writer, false);
-                WriteHeaders(writer2, false);
+                //WriteHeaders(writer, false);
+                //WriteHeaders(writer2, false);
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))

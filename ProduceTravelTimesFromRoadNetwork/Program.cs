@@ -61,8 +61,8 @@ namespace ProduceTravelTimesFromRoadNetwork
             var networks = new[] { networkAM, networkMD, networkPM, networkEV, fullNetwork };
 
             // WriteSurveyData(networks, densityData);
-            WriteTransitSurveydata(networks, densityData);
-            // WriteRealTraces(networkAM, networks, densityData);
+            // WriteTransitSurveydata(networks, densityData);
+            WriteRealTraces(networkAM, networks, densityData);
         }
 
         private static void WriteTransitSurveydata(Network[] networks, Dictionary<int, DensityData> densityData)
@@ -182,18 +182,26 @@ namespace ProduceTravelTimesFromRoadNetwork
                             }
                             return buffer;
                         }
+                        // return the buffer if we are not going to return it
+                        if (builderPool.Count < Environment.ProcessorCount * 2)
+                        {
+                            builderPool.Enqueue(buffer);
+                        }
                         return null;
                     }
                 ))
                 {
                     // write it out
-                    if (toWrite != null && toWrite.Length > 0)
+                    if (toWrite != null)
                     {
-                        writer?.Write(toWrite);
-                    }
-                    if (builderPool.Count < Environment.ProcessorCount * 2)
-                    {
-                        builderPool.Enqueue(toWrite);
+                        if (toWrite.Length > 0)
+                        {
+                            writer?.Write(toWrite);
+                        }
+                        if (builderPool.Count < Environment.ProcessorCount * 2)
+                        {
+                            builderPool.Enqueue(toWrite);
+                        }
                     }
                 }
             }

@@ -263,3 +263,4 @@ __pycache__/
 /EstimateModeChoiceModel/Models
 *.zip
 *.xlsx
+*.csv

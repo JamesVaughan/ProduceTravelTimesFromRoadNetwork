@@ -3,6 +3,7 @@ EPOCHES = 300 # This is a maximum number, not the number required
 BATCH_SIZE = 1024
 number_of_layers = 2
 layer_size = 16
+learning_rate = 0.1
 dropout = 0.5 #[0.2, 0.3, 0.4]
 l2 = 0.01
 train_file_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\CombinedTrain.csv"
@@ -15,7 +16,7 @@ import numpy as np
 import functools
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
-import tensorflow as tf
+import tensorflow as tf 
 from tensorflow import keras
 import pandas as pd
 import logging
@@ -90,19 +91,7 @@ def get_dataset(file_path, columns, epochs, ResultColumn, batch_size, **kwargs):
     if ResultColumn is None:
         return tf.data.Dataset.from_tensor_slices(df.values)
     else:
-        return (target.values, tf.data.Dataset.from_tensor_slices((df.values, target.values)))
-        
-  #dataset = tf.data.experimental.make_csv_dataset(file_path,
-  #    batch_size=batch_size,
-  #    label_name=ResultColumn,
-  #    na_value="?",
-  #    num_epochs=epochs,
-  #    num_rows_for_inference=100000,
-  #    sloppy = False,
-  #    shuffle= False,
-  #    ignore_errors=False, 
-  #    **kwargs)
-  #return dataset
+        return (target.values, tf.data.Dataset.from_tensor_slices((df.values, target.values)), df)
 
 def train_model():
     def create_confusion_matrix(predictions, labels):
@@ -133,12 +122,15 @@ def train_model():
             2 : 1.0
         }
     
-    train_labels, raw_train_data = get_dataset(train_file_path, columns, 10, LABEL_COLUMN, BATCH_SIZE)
-    test_labels, raw_test_data = get_dataset(test_file_path, columns, 1, LABEL_COLUMN, 1024)
+    train_labels, raw_train_data, train_description = get_dataset(train_file_path, columns, 10, LABEL_COLUMN, BATCH_SIZE)
+    test_labels, raw_test_data, test_description = get_dataset(test_file_path, columns, 1, LABEL_COLUMN, 1024)
  
-    def normalize_numeric_data(data, mean, std):
+    def normalize_numeric_data(data, mean, max, min):
           # Centre the data
-          return (data - mean) / std
+          delta = (max - min)
+          if(delta <= 1.0):
+              delta = 1.0
+          return (data) / deta
     
     packed_train_data = raw_train_data#.map(PackNumericFeatures(numeric_features))
     
@@ -146,61 +138,41 @@ def train_model():
     
     # example_batch, labels_batch = next(iter(packed_train_data))
     
-    desc = pd.read_csv(train_file_path)[numeric_features].describe()
-    MEAN = np.array(desc.T['mean'])
-    STD = np.array(desc.T['std'])
-    #
-    ## Update the STD if the result is 0 to replace it with 1.
-    STD[STD == 0.0] = 1.0
-    
-    
-    numeric_columns = []
-    for i in range(len(MEAN)):
-        normalizer = functools.partial(normalize_numeric_data, mean=MEAN[i], std=STD[i])
-        numeric_columns.append(tf.feature_column.numeric_column(numeric_features[i], normalizer_fn=normalizer))
-    
-    
-    
-
-    preprocessing_layer = tf.keras.layers.DenseFeatures(numeric_columns)
-    #layers = [preprocessing_layer]
-    layers = []
-
+    #desc = pd.read_csv(train_file_path)[numeric_features].describe()
+    #MEAN = np.array(desc.T['mean'])
+    #MIN = np.array(desc.T['min'])
+    #MAX = np.array(desc.T['max'])
+      
+    #numeric_columns = []
+    #for i in range(len(numeric_features)):
+    #    #normalizer = functools.partial(normalize_numeric_data, mean=MEAN[i], max=MAX[i], min=MIN[i])
+    #    numeric_columns.append(tf.feature_column.numeric_column(numeric_features[i]))
+        
+    model = tf.keras.Sequential()
+    #model.run_eagerly = True
+    #model.add(tf.keras.layers.DenseFeatures(numeric_columns))
     for i in range(number_of_layers):
-        layers.append(tf.keras.layers.Dense(layer_size, activation='relu',
-                                           kernel_regularizer=tf.keras.regularizers.l2(l2)))
-        layers.append(tf.keras.layers.Dropout(dropout))
+        model.add(tf.keras.layers.Dense(layer_size / (int((i+1) ** 2)), activation='relu', kernel_regularizer=tf.keras.regularizers.l2(l2)))
+        model.add(tf.keras.layers.Dropout(dropout))
+    model.add(keras.layers.Dense(3, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(l2)))
+   
     
-    layers.append(keras.layers.Dense(3, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(l2)))
-    #layers.append(keras.layers.Dense(3, activation='softmax'))
-    
-    
-    # We need at least two layers in order to work with XOR
-    model = tf.keras.models.Sequential(layers)
-    
-    model.compile(optimizer='adam',
-                  #optimizer='sgd',
-                  loss='sparse_categorical_crossentropy', # Use this if you have more than one category
-                  # loss='binary_crossentropy', # Use this if the answers are
-                                                                           # just true / false
-                  metrics=['accuracy'])
-    
-    train_data = packed_train_data.batch(128)#.shuffle(500)
-    test_data = packed_test_data.batch(128)
-    
-    
+
+    train_data = packed_train_data.batch(64)#.shuffle(500)
+    test_data = packed_test_data.batch(1024)
+
     early_stoping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
-    # dir_name = "Models/ModeChoiceModel_" + str(EPOCHES) + "_" + str(number_of_layers) + "_" + str(layer_size) + "_" + str(dropout) + "_" + str(l2)
-    # if not os.path.exists(dir_name):
-    #     os.makedirs(dir_name)
-    # model_checkpoint = tf.keras.callbacks.ModelCheckpoint(dir_name, monitor='val_loss', save_best_only=True)
-    
-    # model.fit(train_data, epochs=EPOCHES, validation_data=test_data, class_weight=class_weights, callbacks=[early_stoping])
-    model.fit(train_data, epochs=EPOCHES,validation_data=test_data, class_weight=class_weights, use_multiprocessing=True, callbacks=[early_stoping], verbose=2)
+
+    #for shrink in range(10):
+    model.compile(#optimizer='adam',
+                optimizer=tf.keras.optimizers.Adam(),
+                loss='sparse_categorical_crossentropy',
+                metrics=['accuracy'])
+    model.fit(train_data, epochs=EPOCHES,validation_data=test_data, callbacks=[early_stoping], class_weight=class_weights, use_multiprocessing=True, workers=10, verbose=2)
               
                                                                
-    train_set = packed_train_data.batch(128)
-    test_set = packed_test_data.batch(128)
+    train_set = packed_train_data.batch(1024)
+    test_set = packed_test_data.batch(1024)
 
     train_prediction = model.predict(train_set)
     test_prediction = model.predict(test_set)
@@ -211,11 +183,16 @@ def train_model():
     print_matrix("test_matrix", test_matrix)
     return model
 
-def predict_real_cell_traces(model):
+real_dataset = None
+
+def predict_real_cell_traces(model, real_dataset):
     #print("Packing Dataset")
     #packed_real_dataset = real_dataset.map(PackNumericFeaturesNoLabel(numeric_features))
     print("Producing Predictions")
-    real_prediction = model.predict(real_dataset.batch(1024, True), use_multiprocessing = True)
+    if real_dataset is None:
+        print("Loading Real Trace Dataset...")
+        real_dataset = get_dataset(real_cell_trace_path, numeric_features, 1, None, 1024)
+    real_prediction = model.predict(real_dataset.batch(1024), use_multiprocessing = True)
 
     count = [0.0,0.0,0.0]
     with open("RealTraceResults.csv", 'w') as writer:
@@ -242,10 +219,8 @@ def predict_real_cell_traces(model):
                     writer.write(',')
                     writer.write(str(pred[2]))
                     writer.write('\n')
-    return
+    return real_dataset
 
-print("Loading Real Dataset")
-real_dataset = get_dataset(real_cell_trace_path, numeric_features, 1, None, 1024)
 
 def get_value_int(prompt):
     while True:
@@ -268,9 +243,10 @@ while True:
     layer_size = get_value_int("Number Of Nodes in Layer: ")
     dropout = get_value_float("Dropout Rate: ")
     l2 = get_value_float("L2: ")
+    #learning_rate = get_value_float("Learning Rate: ")
     print("Training the model.")
     trained_model = train_model()
     if input("Predict real traces (y/[n]): ") == 'y':
         print("Predicting the mode of the real traces")
-        predict_real_cell_traces(trained_model)
+        real_dataset = predict_real_cell_traces(trained_model, real_dataset)
     print("Complete")

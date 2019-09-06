@@ -60,9 +60,14 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV, fullNetwork };
 
-            // WriteSurveyData(networks, densityData);
-            // WriteTransitSurveydata(networks, densityData);
-            WriteRealTraces(networkAM, networks, densityData);
+            // Parallel.Invoke(
+            //  () => WriteSurveyData(networks, densityData),
+            //  () => WriteTransitSurveydata(networks, densityData),
+            //  () => WriteRealTraces(networkAM, networks, densityData)
+            //  );
+            // networkAM.WriteCentroidtoZones("CentroidToAntelZone.csv");
+            // WriteRealTraces(networkAM, networks, densityData);
+            WriteSurveyData(networks, densityData);
         }
 
         private static void WriteTransitSurveydata(Network[] networks, Dictionary<int, DensityData> densityData)
@@ -124,12 +129,13 @@ namespace ProduceTravelTimesFromRoadNetwork
                 //WriteHeaders(writer2, false);
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
+                bool first = true;
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
                 {
                     if (RecordsFor(builder, builder2, networks, personRecord, false, densityData))
                     {
                         // 80% of the records will be stored in the training set
-                        if (rand.NextDouble() < 0.8)
+                        if (first)
                         {
                             writer.Write(builder);
                         }
@@ -137,6 +143,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         {
                             writer2.Write(builder);
                         }
+                        first = !first;
                     }
                     builder.Clear();
                     builder2.Clear();
@@ -218,6 +225,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     if (trips[i].TripEndTime - trips[i].TripStartTime < 5.0f)
                     {
                         trips.RemoveAt(i);
+                        i--;
                     }
                 }
                 // remove trips that are too fast
@@ -229,6 +237,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     if (distance / deltaTime > 200.0f)
                     {
                         trips.RemoveAt(i);
+                        i--;
                     }
                 }
             }
@@ -284,13 +293,13 @@ namespace ProduceTravelTimesFromRoadNetwork
             int currentZone;
             void EmitNothing()
             {
-                mainFeatures.Append(",0");
+                mainFeatures.Append(",0.0");
                 timeStep++;
             }
             void emitDistance(float distance)
             {
                 mainFeatures.Append(',');
-                mainFeatures.Append(Math.Min(1.0f, distance / 100000f));
+                mainFeatures.Append(Math.Min(1.0f, distance / 10000f));
                 timeStep++;
             }
             for (int i = 0; i < trips.Count; i++)
@@ -539,38 +548,38 @@ namespace ProduceTravelTimesFromRoadNetwork
                     // write out the trip specific data (1 if the activity is occurring)
                     for (int j = 0; j < numberOfSegmentsInADay; j++)
                     {
-                        writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? ",1" : ",0");
+                        writer.Append(trips[i].TripStartTime <= j * minutesPerTimeStep && j * minutesPerTimeStep < trips[i].TripEndTime ? ",1.0" : ",0.0");
                     }
                     // Write out the density variables for origin then destination (population,employment,household)
                     if (densityData.TryGetValue(network[0].GetZone(entry.Trips[i].Origin), out var originDensity))
                     {
                         writer.Append(',');
-                        writer.Append(originDensity.PopulationDensity);
+                        writer.Append(originDensity.PopulationDensity / 20000f);
                         writer.Append(',');
-                        writer.Append(originDensity.EmploymentDensity);
+                        writer.Append(originDensity.EmploymentDensity / 20000f);
                         writer.Append(',');
-                        writer.Append(originDensity.HouseholdDensity);
+                        writer.Append(originDensity.HouseholdDensity / 20000f);
                     }
                     else
                     {
-                        writer.Append(",0,0,0");
+                        writer.Append(",0.0,0.0,0.0");
                     }
                     if (densityData.TryGetValue(network[0].GetZone(entry.Trips[i].Destination), out var densityDensity))
                     {
                         writer.Append(',');
-                        writer.Append(densityDensity.PopulationDensity);
+                        writer.Append(densityDensity.PopulationDensity / 20000f);
                         writer.Append(',');
-                        writer.Append(densityDensity.EmploymentDensity);
+                        writer.Append(densityDensity.EmploymentDensity / 20000f);
                         writer.Append(',');
-                        writer.Append(densityDensity.HouseholdDensity);
+                        writer.Append(densityDensity.HouseholdDensity / 20000f);
                     }
                     else
                     {
-                        writer.Append(",0,0,0");
+                        writer.Append(",0.0,0.0,0.0");
                     }
                     // write the total distance of the trip
                     writer.Append(',');
-                    writer.Append(TripDistance(network[0], entry.Trips[i]));
+                    writer.Append(TripDistance(network[0], entry.Trips[i]) / 50000f);
                     writer.AppendLine();
                 }
             }

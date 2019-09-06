@@ -75,13 +75,15 @@ namespace ProduceTravelTimesFromRoadNetwork
                             currentPerson = personNumber;
                             validPerson = true;
                         }
-                        if (!ConvertFloatStringToInt(reader, 6, out trip.Origin)
-                            || !ConvertFloatStringToInt(reader, 7, out trip.Destination)
+                        if (!ConvertFloatStringToInt(reader, 24, out trip.Origin)
+                            || !ConvertFloatStringToInt(reader, 25, out trip.Destination)
                             || !ConvertMode(reader, 9, out trip.Mode) || !ConvertTime(reader, 4, out trip.TripStartTime) || !ConvertTime(reader, 5, out trip.TripEndTime)
                             || !ConvertFloatStringToInt(reader, 22, out var originInZone)
                             || !ConvertFloatStringToInt(reader, 23, out var destinationInZone)
                             || originInZone < 1f
-                            || destinationInZone < 1f)
+                            || destinationInZone < 1f
+                            || trip.Origin < 0
+                            || trip.Destination < 0)
                         {
                             validPerson = false;
                         }

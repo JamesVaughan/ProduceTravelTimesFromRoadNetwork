@@ -75,6 +75,32 @@ namespace ProduceTravelTimesFromRoadNetwork
 
         }
 
+        public void WriteCentroidtoZones(string filePath)
+        {
+            using(var writer = new StreamWriter(filePath))
+            {
+                writer.WriteLine("Centroid,X,Y,Zone");
+                foreach(var pair in _centroidsInZone)
+                {
+                    var zone = pair.Key;
+                    var centroids = pair.Value;
+                    if (centroids != null)
+                    {
+                        foreach(var centroid in centroids)
+                        {
+                            writer.Write(centroid.NodeNumber);
+                            writer.Write(',');
+                            writer.Write(centroid.X);
+                            writer.Write(',');
+                            writer.Write(centroid.Y);
+                            writer.Write(',');
+                            writer.WriteLine(zone);
+                        }
+                    }
+                }
+            }
+        }
+
         private void Add(Node node)
         {
             node.LinksTo = node.LinksTo ?? new List<int>();

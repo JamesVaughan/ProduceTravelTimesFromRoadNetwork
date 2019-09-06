@@ -1,10 +1,10 @@
 ################### ESTIMATION PARAMETERS ##########################
 EPOCHES = 300 # This is a maximum number, not the number required
-BATCH_SIZE = 128
-number_of_layers = 3
-layer_size = 64
+BATCH_SIZE = 1024
+number_of_layers = 2
+layer_size = 16
 dropout = 0.5 #[0.2, 0.3, 0.4]
-l2 = 0.001
+l2 = 0.01
 train_file_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\CombinedTrain.csv"
 test_file_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\CombinedTest.csv"
 real_cell_trace_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\ReadCellTraces.csv"
@@ -12,24 +12,17 @@ real_cell_trace_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadN
 import functools
 
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras
 import functools
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+import tensorflow as tf
+from tensorflow import keras
 import pandas as pd
-
-def get_dataset(file_path, epochs, ResultColumn, **kwargs):
-  dataset = tf.data.experimental.make_csv_dataset(file_path,
-      batch_size=BATCH_SIZE,
-      label_name=ResultColumn,
-      na_value="?",
-      num_epochs=epochs,
-      num_rows_for_inference=100000,
-      sloppy = False,
-      shuffle= False,
-      ignore_errors=False, 
-      **kwargs)
-  return dataset
+import logging
+tf.get_logger().setLevel(logging.ERROR)
+tf.debugging.set_log_device_placement(False)
+# Make numpy values easier to read.
+np.set_printoptions(precision=3, suppress=True)
 
 def pack(features, label):
   return tf.stack(list(features.values()), axis=-1), label
@@ -81,15 +74,44 @@ for i in ['OriginPopulationDensity', 'OriginEmploymentDensity','OriginHouseholdD
 numeric_features.append('TripDistance')
 column_types.append(tf.float32)
 
+def get_dataset(file_path, columns, epochs, ResultColumn, batch_size, **kwargs):
+    df = pd.read_csv(file_path, delimiter=',', header = 0)#, names = columns, dtype = dtypes)
+    target = None
+    if not (ResultColumn is None):
+        target = df.pop(ResultColumn)
+    # Remove extra columns
+    to_delete = []
+    for name, _ in df.iteritems():
+        if not (name in columns):
+            to_delete.append(name)
+    for d in to_delete:
+        df.pop(d)
+
+    if ResultColumn is None:
+        return tf.data.Dataset.from_tensor_slices(df.values)
+    else:
+        return (target.values, tf.data.Dataset.from_tensor_slices((df.values, target.values)))
+        
+  #dataset = tf.data.experimental.make_csv_dataset(file_path,
+  #    batch_size=batch_size,
+  #    label_name=ResultColumn,
+  #    na_value="?",
+  #    num_epochs=epochs,
+  #    num_rows_for_inference=100000,
+  #    sloppy = False,
+  #    shuffle= False,
+  #    ignore_errors=False, 
+  #    **kwargs)
+  #return dataset
+
 def train_model():
-    def create_confusion_matrix(predictions, dataset):
+    def create_confusion_matrix(predictions, labels):
         confusion_matrix = [[0,0,0],[0,0,0],[0,0,0]]
-        pos = 0
-        for _, label in dataset:
-            for l in label:
-                for i in range(0, 3):
-                    confusion_matrix[l][i] += predictions[pos][i]
-                pos += 1
+        labelIndex = 0
+        for pred in predictions:
+            for i in range(3):
+                confusion_matrix[labels[labelIndex]][i] += pred[i]
+            labelIndex += 1
         return confusion_matrix
     
     def print_matrix(name, matrix):
@@ -99,55 +121,50 @@ def train_model():
                 print(col, end=',')
             print()
     
-    tf.debugging.set_log_device_placement(False)
-    # Make numpy values easier to read.
-    np.set_printoptions(precision=3, suppress=True)
-    
     LABEL_COLUMN = 'Result'
     LABELS = [0, 1, 2]
-    
-    raw_train_data = get_dataset(train_file_path, 10, LABEL_COLUMN)
-    raw_test_data = get_dataset(test_file_path, 1, LABEL_COLUMN)
-    
     LABEL_COLUMN = 'Result'
     columns = ['Result']
     columns = columns + numeric_features
     LABELS = [0, 1, 2]
     class_weights = {
             0 : 1.0,
-            1 : 0.108206,
+            1 : 1.0,
             2 : 1.0
         }
     
-   
+    train_labels, raw_train_data = get_dataset(train_file_path, columns, 10, LABEL_COLUMN, BATCH_SIZE)
+    test_labels, raw_test_data = get_dataset(test_file_path, columns, 1, LABEL_COLUMN, 1024)
+ 
     def normalize_numeric_data(data, mean, std):
           # Centre the data
           return (data - mean) / std
     
-    packed_train_data = raw_train_data.map(PackNumericFeatures(numeric_features))
+    packed_train_data = raw_train_data#.map(PackNumericFeatures(numeric_features))
     
-    packed_test_data = raw_test_data.map(PackNumericFeatures(numeric_features))
+    packed_test_data = raw_test_data#.map(PackNumericFeatures(numeric_features))
     
     # example_batch, labels_batch = next(iter(packed_train_data))
     
     desc = pd.read_csv(train_file_path)[numeric_features].describe()
     MEAN = np.array(desc.T['mean'])
     STD = np.array(desc.T['std'])
-    
-    # Update the STD if the result is 0 to replace it with 1.
+    #
+    ## Update the STD if the result is 0 to replace it with 1.
     STD[STD == 0.0] = 1.0
     
     
+    numeric_columns = []
+    for i in range(len(MEAN)):
+        normalizer = functools.partial(normalize_numeric_data, mean=MEAN[i], std=STD[i])
+        numeric_columns.append(tf.feature_column.numeric_column(numeric_features[i], normalizer_fn=normalizer))
     
-    normalizer = functools.partial(normalize_numeric_data, mean=MEAN, std=STD)
-    
-    numeric_column = tf.feature_column.numeric_column('numeric', normalizer_fn=normalizer, shape=[len(numeric_features)])
-    numeric_columns = [numeric_column]
     
     
 
     preprocessing_layer = tf.keras.layers.DenseFeatures(numeric_columns)
-    layers = [preprocessing_layer]
+    #layers = [preprocessing_layer]
+    layers = []
 
     for i in range(number_of_layers):
         layers.append(tf.keras.layers.Dense(layer_size, activation='relu',
@@ -168,51 +185,92 @@ def train_model():
                                                                            # just true / false
                   metrics=['accuracy'])
     
-    train_data = packed_train_data#.shuffle(500)
-    test_data = packed_test_data
+    train_data = packed_train_data.batch(128)#.shuffle(500)
+    test_data = packed_test_data.batch(128)
     
     
     early_stoping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
-    dir_name = "Models/ModeChoiceModel_" + str(EPOCHES) + "_" + str(number_of_layers) + "_" + str(layer_size) + "_" + str(dropout) + "_" + str(l2)
-    if not os.path.exists(dir_name):
-        os.makedirs(dir_name)
-    model_checkpoint = tf.keras.callbacks.ModelCheckpoint(dir_name, monitor='val_loss', save_best_only=True)
+    # dir_name = "Models/ModeChoiceModel_" + str(EPOCHES) + "_" + str(number_of_layers) + "_" + str(layer_size) + "_" + str(dropout) + "_" + str(l2)
+    # if not os.path.exists(dir_name):
+    #     os.makedirs(dir_name)
+    # model_checkpoint = tf.keras.callbacks.ModelCheckpoint(dir_name, monitor='val_loss', save_best_only=True)
     
-    model.fit(train_data, epochs=EPOCHES,
-              validation_data=test_data, class_weight=class_weights, callbacks=[early_stoping])
+    # model.fit(train_data, epochs=EPOCHES, validation_data=test_data, class_weight=class_weights, callbacks=[early_stoping])
+    model.fit(train_data, epochs=EPOCHES,validation_data=test_data, class_weight=class_weights, use_multiprocessing=True, callbacks=[early_stoping], verbose=2)
+              
                                                                
-    train_set = train_data.take(-1)
-    test_set = test_data.take(-1)
+    train_set = packed_train_data.batch(128)
+    test_set = packed_test_data.batch(128)
 
     train_prediction = model.predict(train_set)
     test_prediction = model.predict(test_set)
-    train_matrix = create_confusion_matrix(train_prediction, train_set)
-    test_matrix = create_confusion_matrix(test_prediction, test_set)
+    train_matrix = create_confusion_matrix(train_prediction, train_labels)
+    test_matrix = create_confusion_matrix(test_prediction, test_labels)
     
     print_matrix("train_matrix", train_matrix)
     print_matrix("test_matrix", test_matrix)
     return model
 
 def predict_real_cell_traces(model):
-    print("Loading Dataset")
-    real_dataset = get_dataset(real_cell_trace_path, 1, None)
-    print("Packing Dataset")
-    packed_real_dataset = real_dataset.map(PackNumericFeaturesNoLabel(numeric_features))
+    #print("Packing Dataset")
+    #packed_real_dataset = real_dataset.map(PackNumericFeaturesNoLabel(numeric_features))
     print("Producing Predictions")
-    real_prediction = model.predict(packed_real_dataset)
-    print("Storing Predictions")
+    real_prediction = model.predict(real_dataset.batch(1024, True), use_multiprocessing = True)
+
+    count = [0.0,0.0,0.0]
     with open("RealTraceResults.csv", 'w') as writer:
         writer.write("Auto,Transit,Active\n")
         for pred in real_prediction:
-            writer.write(str(pred[0]))
-            writer.write(',')
-            writer.write(str(pred[1]))
-            writer.write(',')
-            writer.write(str(pred[2]))
-            writer.write('\n')
+            count[0] += pred[0]
+            count[1] += pred[1]
+            count[2] += pred[2]
+    print("Total Predictions:")
+    sum_of_count = 0
+    for c in count:
+        sum_of_count += c
+    for c in count:
+        print("%.0f%%" % (100 * (c / sum_of_count)), end=' ')
+    print()
+    if input("Should we save the results(y/[n]): ") == 'y':
+            print("Storing Predictions")
+            with open("RealTraceResults.csv", 'w') as writer:
+                writer.write("Auto,Transit,Active\n")
+                for pred in real_prediction:
+                    writer.write(str(pred[0]))
+                    writer.write(',')
+                    writer.write(str(pred[1]))
+                    writer.write(',')
+                    writer.write(str(pred[2]))
+                    writer.write('\n')
     return
-print("Training the model.")
-trained_model = train_model()
-print("Predicting the mode of the real traces")
-predict_real_cell_traces(trained_model)
-print("Complete")
+
+print("Loading Real Dataset")
+real_dataset = get_dataset(real_cell_trace_path, numeric_features, 1, None, 1024)
+
+def get_value_int(prompt):
+    while True:
+        try:
+            return int(input(prompt))
+        except:
+            print("Invalid integer")
+            pass
+
+def get_value_float(prompt):
+    while True:
+        try:
+            return float(input(prompt))
+        except:
+            print("Invalid number")
+            pass
+
+while True:
+    number_of_layers = get_value_int("Number of layers: ")
+    layer_size = get_value_int("Number Of Nodes in Layer: ")
+    dropout = get_value_float("Dropout Rate: ")
+    l2 = get_value_float("L2: ")
+    print("Training the model.")
+    trained_model = train_model()
+    if input("Predict real traces (y/[n]): ") == 'y':
+        print("Predicting the mode of the real traces")
+        predict_real_cell_traces(trained_model)
+    print("Complete")

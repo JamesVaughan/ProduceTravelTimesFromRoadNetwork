@@ -136,7 +136,7 @@ namespace ConvertCellTraces
                                     }
                                 }
                             }
-                            // Pass 2, Make sure tha max value of the features are 1
+                            // Pass 2, Make sure the max value of the features are 1
                             for (int i = 0; i < distanceInTime.Length; i++)
                             {
                                 distanceInTime[i] = Math.Min(distanceInTime[i], 1.0f);
@@ -212,7 +212,7 @@ namespace ConvertCellTraces
         {
             var dx = previousZone.X - hopZone.X;
             var dy = previousZone.Y - hopZone.Y;
-            return Math.Min((float)Math.Sqrt(dx * dx + dy * dy) / 100000f, 1.0f);
+            return (float)Math.Sqrt(dx * dx + dy * dy);
         }
 
         private static void LoadDataAsync(string file, BlockingCollection<string> readLines, BlockingCollection<PersonDay> readData)

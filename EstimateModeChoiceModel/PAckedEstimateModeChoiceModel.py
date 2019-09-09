@@ -27,6 +27,28 @@ np.set_printoptions(precision=3, suppress=True)
 
 def pack(features, label):
   return tf.stack(list(features.values()), axis=-1), label
+
+class PackNumericFeatures(object):
+  def __init__(self, names):
+    self.names = names
+
+  def __call__(self, features, labels):
+    numeric_freatures = [features.pop(name) for name in self.names]
+    numeric_features = [tf.cast(feat, tf.float32) for feat in numeric_freatures]
+    numeric_features = tf.stack(numeric_features, axis=-1)
+    features['numeric'] = numeric_features
+    return features, labels
+
+class PackNumericFeaturesNoLabel(object):
+  def __init__(self, names):
+    self.names = names
+
+  def __call__(self, features):
+    numeric_freatures = [features.pop(name) for name in self.names]
+    numeric_features = [tf.cast(feat, tf.float32) for feat in numeric_freatures]
+    numeric_features = tf.stack(numeric_features, axis=-1)
+    features['numeric'] = numeric_features
+    return features
     
 numeric_features = []
 column_types = [tf.int32]
@@ -97,26 +119,29 @@ def train_model():
     train_labels, raw_train_data, train_description = get_dataset(train_file_path, columns, 10, LABEL_COLUMN, BATCH_SIZE)
     test_labels, raw_test_data, test_description = get_dataset(test_file_path, columns, 1, LABEL_COLUMN, 1024)
  
-    def normalize_numeric_data(data, mean, max, min):
-          # Centre the data
-          delta = (max - min)
-          if(delta <= 1.0):
-              delta = 1.0
+    def normalize_numeric_data(data, mean, min, delta):
           return (data - min) / delta
     
-    packed_train_data = raw_train_data#.map(PackNumericFeatures(numeric_features))
-    
-    packed_test_data = raw_test_data#.map(PackNumericFeatures(numeric_features))
+    packed_train_data = raw_train_data.map(PackNumericFeatures(numeric_features))
+    packed_test_data = raw_test_data.map(PackNumericFeatures(numeric_features))
        
-    desc = pd.read_csv(train_file_path)[numeric_features].describe()
+    normalize_dataset = pd.read_csv(train_file_path)
+    normalize_dataset = normalize_dataset[numeric_features]
+    desc = normalize_dataset.describe()
     MEAN = np.array(desc.T['mean'])
     MIN = np.array(desc.T['min'])
-    MAX = np.array(desc.T['max'])
-      
-    numeric_columns = []
-    for i in range(len(numeric_features)):
-        normalizer = functools.partial(normalize_numeric_data, mean=MEAN[i], max=MAX[i], min=MIN[i])
-        numeric_columns.append(tf.feature_column.numeric_column(numeric_features[i], normalizer_fn = normalizer))
+    DELTA = (desc.T['max'] - desc.T['min'])
+    for i in range(len(DELTA)):
+        if DELTA[i] < 1.0:
+            DELTA[i] = 1.0
+    DELTA = np.array(DELTA)  
+    
+    normalizer = functools.partial(normalize_numeric_data, mean=MEAN, min=MIN, delta=DELTA)
+    numeric_column = tf.feature_column.numeric_column('numeric', normalizer_fn=normalizer, shape=[len(numeric_features)])
+    numeric_columns = [numeric_column]
+
+    print (len(DELTA))
+    print (len(numeric_features))
         
     layers = [tf.keras.layers.DenseFeatures(numeric_columns)]
     for i in range(number_of_layers):
@@ -160,7 +185,7 @@ def predict_real_cell_traces(model):
     for part in range(0, 200):
         to_load = real_cell_trace_dir + "\\ProcessedTrace-part-"+("{:05d}".format(part))+".csv"
         print("Processing: " + to_load)
-        real_dataset = get_dataset(to_load, numeric_features, 1, None, 1024)
+        real_dataset = get_dataset(to_load, numeric_features, 1, None, 1024).map(PackNumericFeaturesNoLabel(numeric_features))
         real_prediction = model.predict(real_dataset.batch(1024).prefetch(20), use_multiprocessing = True, workers=10)
         for pred in real_prediction:
             count[0] += pred[0]

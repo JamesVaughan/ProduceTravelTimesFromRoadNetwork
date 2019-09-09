@@ -11,7 +11,7 @@ tf.debugging.set_log_device_placement(False)
 EPOCHES = 20
 BATCH_SIZE = 1024
 layers_to_test = [3]
-width_to_test = [64]
+width_to_test = [400]
 dropout_to_test = [0.5] #[0.2, 0.3, 0.4]
 l2_to_test = [0.002]
 ################### \ESTIMATION PARAMETERS ##########################
@@ -115,7 +115,8 @@ for dropout in dropout_to_test:
                 if not os.path.exists(dir_name):
                     os.makedirs(dir_name)
                 model_checkpoint = tf.keras.callbacks.ModelCheckpoint(dir_name, monitor='val_loss', save_best_only=True)
+                train_data = raw_train_data.cache()
                 
-                model.fit(raw_train_data, epochs=EPOCHES,
+                model.fit(train_data, epochs=EPOCHES,
                           validation_data=raw_test_data, class_weight=class_weights, callbacks=[early_stoping
                                                                                                 ])

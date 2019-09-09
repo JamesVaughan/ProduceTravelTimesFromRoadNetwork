@@ -60,14 +60,16 @@ namespace ProduceTravelTimesFromRoadNetwork
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
             var networks = new[] { networkAM, networkMD, networkPM, networkEV, fullNetwork };
 
-            // Parallel.Invoke(
-            //  () => WriteSurveyData(networks, densityData),
-            //  () => WriteTransitSurveydata(networks, densityData),
-            //  () => WriteRealTraces(networkAM, networks, densityData)
-            //  );
+            Parallel.Invoke(
+             () => WriteSurveyData(networks, densityData)
+             //() => WriteTransitSurveydata(networks, densityData)
+             /* 
+              * NEVER ENABLE THIS; It saves all traces as a drive trip.  Instead use the program ConvertCellTraces included in this solution
+              * () => WriteRealTraces(networkAM, networks, densityData) */
+             );
             // networkAM.WriteCentroidtoZones("CentroidToAntelZone.csv");
             // WriteRealTraces(networkAM, networks, densityData);
-            WriteSurveyData(networks, densityData);
+            // WriteSurveyData(networks, densityData);
         }
 
         private static void WriteTransitSurveydata(Network[] networks, Dictionary<int, DensityData> densityData)
@@ -129,13 +131,13 @@ namespace ProduceTravelTimesFromRoadNetwork
                 //WriteHeaders(writer2, false);
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
-                bool first = true;
+                //bool first = true;
                 foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
                 {
                     if (RecordsFor(builder, builder2, networks, personRecord, false, densityData))
                     {
                         // 80% of the records will be stored in the training set
-                        if (first)
+                        if (rand.NextDouble() < 0.8)
                         {
                             writer.Write(builder);
                         }
@@ -143,7 +145,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         {
                             writer2.Write(builder);
                         }
-                        first = !first;
+                        //first = !first;
                     }
                     builder.Clear();
                     builder2.Clear();
@@ -299,7 +301,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             void emitDistance(float distance)
             {
                 mainFeatures.Append(',');
-                mainFeatures.Append(Math.Min(1.0f, distance / 10000f));
+                mainFeatures.Append(distance);
                 timeStep++;
             }
             for (int i = 0; i < trips.Count; i++)
@@ -554,11 +556,11 @@ namespace ProduceTravelTimesFromRoadNetwork
                     if (densityData.TryGetValue(network[0].GetZone(entry.Trips[i].Origin), out var originDensity))
                     {
                         writer.Append(',');
-                        writer.Append(originDensity.PopulationDensity / 20000f);
+                        writer.Append(originDensity.PopulationDensity);
                         writer.Append(',');
-                        writer.Append(originDensity.EmploymentDensity / 20000f);
+                        writer.Append(originDensity.EmploymentDensity);
                         writer.Append(',');
-                        writer.Append(originDensity.HouseholdDensity / 20000f);
+                        writer.Append(originDensity.HouseholdDensity);
                     }
                     else
                     {
@@ -567,11 +569,11 @@ namespace ProduceTravelTimesFromRoadNetwork
                     if (densityData.TryGetValue(network[0].GetZone(entry.Trips[i].Destination), out var densityDensity))
                     {
                         writer.Append(',');
-                        writer.Append(densityDensity.PopulationDensity / 20000f);
+                        writer.Append(densityDensity.PopulationDensity);
                         writer.Append(',');
-                        writer.Append(densityDensity.EmploymentDensity / 20000f);
+                        writer.Append(densityDensity.EmploymentDensity);
                         writer.Append(',');
-                        writer.Append(densityDensity.HouseholdDensity / 20000f);
+                        writer.Append(densityDensity.HouseholdDensity);
                     }
                     else
                     {
@@ -579,7 +581,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                     }
                     // write the total distance of the trip
                     writer.Append(',');
-                    writer.Append(TripDistance(network[0], entry.Trips[i]) / 50000f);
+                    writer.Append(TripDistance(network[0], entry.Trips[i]));
                     writer.AppendLine();
                 }
             }

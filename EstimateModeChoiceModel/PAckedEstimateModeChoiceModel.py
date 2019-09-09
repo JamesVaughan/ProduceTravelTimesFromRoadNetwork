@@ -8,7 +8,7 @@ dropout = 0.5 #[0.2, 0.3, 0.4]
 l2 = 0.01
 train_file_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\CombinedTrain.csv"
 test_file_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\CombinedTest.csv"
-real_cell_trace_path = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ProduceTravelTimesFromRoadNetwork\bin\Release\netcoreapp2.2\ReadCellTraces.csv"
+real_cell_trace_dir = r"C:\Users\phibr\source\repos\ProduceTravelTimesFromRoadNetwork\ConvertCellTraces\bin\Release\netcoreapp2.2"
 ################### \ESTIMATION PARAMETERS ##########################
 import functools
 
@@ -28,34 +28,6 @@ np.set_printoptions(precision=3, suppress=True)
 def pack(features, label):
   return tf.stack(list(features.values()), axis=-1), label
     
-   
-class PackNumericFeatures(object):
-  def __init__(self, names):
-    self.names = names
-
-  def __call__(self, features, labels):
-    numeric_freatures = [features.pop(name) for name in self.names]
-    numeric_features = [tf.cast(feat, tf.float32) for feat in numeric_freatures]
-    numeric_features = tf.stack(numeric_features, axis=-1)
-    features['numeric'] = numeric_features
-    return features, labels
-
-class PackNumericFeaturesNoLabel(object):
-  def __init__(self, names):
-    self.names = names
-
-  def __call__(self, features):
-    numeric_freatures = [features.pop(name) for name in self.names]
-    numeric_features = [tf.cast(feat, tf.float32) for feat in numeric_freatures]
-    numeric_features = tf.stack(numeric_features, axis=-1)
-    features['numeric'] = numeric_features
-    return features
-
-def show_batch(dataset):
-    for batch, label in dataset.take(1):
-        for key, value in batch.items():
-            print("{:20s}: {}".format(key,value.numpy()))
-
 numeric_features = []
 column_types = [tf.int32]
     
@@ -89,9 +61,9 @@ def get_dataset(file_path, columns, epochs, ResultColumn, batch_size, **kwargs):
         df.pop(d)
 
     if ResultColumn is None:
-        return tf.data.Dataset.from_tensor_slices(df.values)
+        return tf.data.Dataset.from_tensor_slices(dict(df))
     else:
-        return (target.values, tf.data.Dataset.from_tensor_slices((df.values, target.values)), df)
+        return (target.values, tf.data.Dataset.from_tensor_slices((dict(df), target.values)), df)
 
 def train_model():
     def create_confusion_matrix(predictions, labels):
@@ -117,9 +89,9 @@ def train_model():
     columns = columns + numeric_features
     LABELS = [0, 1, 2]
     class_weights = {
-            0 : 1.0,
-            1 : 1.0,
-            2 : 1.0
+            0 : 1,
+            1 : 1,
+            2 : 1
         }
     
     train_labels, raw_train_data, train_description = get_dataset(train_file_path, columns, 10, LABEL_COLUMN, BATCH_SIZE)
@@ -130,49 +102,46 @@ def train_model():
           delta = (max - min)
           if(delta <= 1.0):
               delta = 1.0
-          return (data) / deta
+          return (data - min) / delta
     
     packed_train_data = raw_train_data#.map(PackNumericFeatures(numeric_features))
     
     packed_test_data = raw_test_data#.map(PackNumericFeatures(numeric_features))
-    
-    # example_batch, labels_batch = next(iter(packed_train_data))
-    
-    #desc = pd.read_csv(train_file_path)[numeric_features].describe()
-    #MEAN = np.array(desc.T['mean'])
-    #MIN = np.array(desc.T['min'])
-    #MAX = np.array(desc.T['max'])
+       
+    desc = pd.read_csv(train_file_path)[numeric_features].describe()
+    MEAN = np.array(desc.T['mean'])
+    MIN = np.array(desc.T['min'])
+    MAX = np.array(desc.T['max'])
       
-    #numeric_columns = []
-    #for i in range(len(numeric_features)):
-    #    #normalizer = functools.partial(normalize_numeric_data, mean=MEAN[i], max=MAX[i], min=MIN[i])
-    #    numeric_columns.append(tf.feature_column.numeric_column(numeric_features[i]))
+    numeric_columns = []
+    for i in range(len(numeric_features)):
+        normalizer = functools.partial(normalize_numeric_data, mean=MEAN[i], max=MAX[i], min=MIN[i])
+        numeric_columns.append(tf.feature_column.numeric_column(numeric_features[i], normalizer_fn = normalizer))
         
-    model = tf.keras.Sequential()
-    #model.run_eagerly = True
-    #model.add(tf.keras.layers.DenseFeatures(numeric_columns))
+    layers = [tf.keras.layers.DenseFeatures(numeric_columns)]
     for i in range(number_of_layers):
-        model.add(tf.keras.layers.Dense(layer_size / (int((i+1) ** 2)), activation='relu', kernel_regularizer=tf.keras.regularizers.l2(l2)))
-        model.add(tf.keras.layers.Dropout(dropout))
-    model.add(keras.layers.Dense(3, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(l2)))
-   
+        layers.append(tf.keras.layers.Dense(layer_size, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(l2)))
+        layers.append(tf.keras.layers.Dropout(dropout))
+    layers.append(keras.layers.Dense(3, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(l2)))
+    model = tf.keras.Sequential(layers)
     
 
-    train_data = packed_train_data.batch(64)#.shuffle(500)
-    test_data = packed_test_data.batch(1024)
+    train_data = packed_train_data.batch(512).cache().prefetch(20)#.shuffle(500)
+    test_data = packed_test_data.batch(1024).cache().prefetch(20)
 
-    early_stoping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+    early_stoping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
     #for shrink in range(10):
     model.compile(#optimizer='adam',
                 optimizer=tf.keras.optimizers.Adam(),
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy'])
-    model.fit(train_data, epochs=EPOCHES,validation_data=test_data, callbacks=[early_stoping], class_weight=class_weights, use_multiprocessing=True, workers=10, verbose=2)
+    model.fit(train_data, epochs=EPOCHES,validation_data=test_data, callbacks=[early_stoping], class_weight=class_weights, use_multiprocessing=True, workers=10)
+    #model.fit(train_data, epochs=EPOCHES,validation_data=test_data, class_weight=class_weights, use_multiprocessing=True, workers=10, verbose=2)
               
                                                                
-    train_set = packed_train_data.batch(1024)
-    test_set = packed_test_data.batch(1024)
+    train_set = packed_train_data.batch(128).prefetch(20)
+    test_set = packed_test_data.batch(1024).prefetch(20)
 
     train_prediction = model.predict(train_set)
     test_prediction = model.predict(test_set)
@@ -183,43 +152,37 @@ def train_model():
     print_matrix("test_matrix", test_matrix)
     return model
 
-real_dataset = None
-
-def predict_real_cell_traces(model, real_dataset):
+def predict_real_cell_traces(model):
     #print("Packing Dataset")
     #packed_real_dataset = real_dataset.map(PackNumericFeaturesNoLabel(numeric_features))
-    print("Producing Predictions")
-    if real_dataset is None:
-        print("Loading Real Trace Dataset...")
-        real_dataset = get_dataset(real_cell_trace_path, numeric_features, 1, None, 1024)
-    real_prediction = model.predict(real_dataset.batch(1024), use_multiprocessing = True)
-
+    
     count = [0.0,0.0,0.0]
-    with open("RealTraceResults.csv", 'w') as writer:
-        writer.write("Auto,Transit,Active\n")
+    for part in range(0, 200):
+        to_load = real_cell_trace_dir + "\\ProcessedTrace-part-"+("{:05d}".format(part))+".csv"
+        print("Processing: " + to_load)
+        real_dataset = get_dataset(to_load, numeric_features, 1, None, 1024)
+        real_prediction = model.predict(real_dataset.batch(1024).prefetch(20), use_multiprocessing = True, workers=10)
         for pred in real_prediction:
             count[0] += pred[0]
             count[1] += pred[1]
             count[2] += pred[2]
-    print("Total Predictions:")
-    sum_of_count = 0
-    for c in count:
-        sum_of_count += c
-    for c in count:
-        print("%.0f%%" % (100 * (c / sum_of_count)), end=' ')
-    print()
-    if input("Should we save the results(y/[n]): ") == 'y':
-            print("Storing Predictions")
-            with open("RealTraceResults.csv", 'w') as writer:
-                writer.write("Auto,Transit,Active\n")
-                for pred in real_prediction:
-                    writer.write(str(pred[0]))
-                    writer.write(',')
-                    writer.write(str(pred[1]))
-                    writer.write(',')
-                    writer.write(str(pred[2]))
-                    writer.write('\n')
-    return real_dataset
+        print("Predictions so far: ", end=' ')
+        sum_of_count = 0
+        for c in count:
+            sum_of_count += c
+        for c in count:
+            print("%.0f%%" % (100 * (c / sum_of_count)), end=' ')
+        print()
+        with open("RealTraceResults-"+str(part)+".csv", 'w') as writer:
+            writer.write("Auto,Transit,Active\n")
+            for pred in real_prediction:
+                writer.write(str(pred[0]))
+                writer.write(',')
+                writer.write(str(pred[1]))
+                writer.write(',')
+                writer.write(str(pred[2]))
+                writer.write('\n')
+    return
 
 
 def get_value_int(prompt):
@@ -248,5 +211,5 @@ while True:
     trained_model = train_model()
     if input("Predict real traces (y/[n]): ") == 'y':
         print("Predicting the mode of the real traces")
-        real_dataset = predict_real_cell_traces(trained_model, real_dataset)
+        predict_real_cell_traces(trained_model)
     print("Complete")

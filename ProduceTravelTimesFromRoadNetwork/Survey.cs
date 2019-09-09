@@ -121,7 +121,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                         {
                             reader.Get(out string personID, 1);
                             // if we are starting a new person
-                            if (previousPersonID != personID)
+                            if (previousPersonID != personID || previousDate != date)
                             {
                                 if (validPerson)
                                 {

@@ -72,15 +72,16 @@ namespace ConvertCellTraces
         static void Main(string[] args)
         {
             var zones = Zone.LoadZones(@"G:\TMG\Research\Montevideo\NeuralNetwork\Zones.csv");
-            using (var writer = new StreamWriter("RealTraces.csv"))
+            Dictionary<int, DensityData> densityData = DensityData.LoadDensityData(@"G:\TMG\Research\Montevideo\Cell data\AntelZoneData.csv");
+            var traceFiles = GetFilesToParse();
+            Parallel.ForEach(traceFiles, (string traceFile) =>
             {
-                WriteHeaders(writer);
-                var traceFiles = GetFilesToParse();
-                foreach (var traceFile in traceFiles)
+                using (var writer = new StreamWriter("ProcessedTrace-" + Path.GetFileName(traceFile).Substring(0, 10) + ".csv"))
                 {
+                    WriteHeaders(writer);
                     Console.WriteLine("Starting to process " + traceFile);
                     // each line is a complete json block
-                    // Allow only a small readahead
+                    // Allow only a small read ahead
                     using (BlockingCollection<string> readLines = new BlockingCollection<string>(25))
                     using (BlockingCollection<PersonDay> readData = new BlockingCollection<PersonDay>(25))
                     {
@@ -91,7 +92,7 @@ namespace ConvertCellTraces
                         foreach (var personDay in readData.GetConsumingEnumerable())
                         {
                             // ignore persons that make no steps in their day
-                            if(personDay.Steps.Count <= 0)
+                            if (personDay.Steps.Count <= 0)
                             {
                                 continue;
                             }
@@ -124,7 +125,7 @@ namespace ConvertCellTraces
                                     {
                                         var originTime = ConvertTime(initialTime, step.OriginTime);
                                         var destinationTime = ConvertTime(initialTime, step.DestinationTime);
-                                        if(originTime == destinationTime)
+                                        if (originTime == destinationTime)
                                         {
                                             continue;
                                         }
@@ -136,23 +137,19 @@ namespace ConvertCellTraces
                                     }
                                 }
                             }
-                            // Pass 2, Make sure the max value of the features are 1
-                            for (int i = 0; i < distanceInTime.Length; i++)
-                            {
-                                distanceInTime[i] = Math.Min(distanceInTime[i], 1.0f);
-                            }
+                            // Pass 2, Create the distance line
+                            var distancesAsString = String.Join(',', distanceInTime.Select(d => d <= 0.0f ? "0.0" : d.ToString()));
                             // Pass 3, Write out all of the trips as traces if they are not intrazonal
-                            var distancesAsString = String.Join(',', distanceInTime);
-                            foreach(var step in personDay.Steps)
+                            foreach (var step in personDay.Steps)
                             {
-                                if(step.Type == "trip")
+                                if (step.Type == "trip")
                                 {
-                                    if(step.Origin != step.Destination)
+                                    if (step.Origin != step.Destination)
                                     {
                                         var originTime = ConvertTime(initialTime, step.OriginTime);
                                         var originBin = ConvertToBinAddress(originTime);
                                         // the trip has to start during the course of the day
-                                        if(originBin <= 0)
+                                        if (originBin <= 0)
                                         {
                                             continue;
                                         }
@@ -171,7 +168,6 @@ namespace ConvertCellTraces
                                         writer.Write(originTime);
                                         writer.Write(",");
                                         writer.Write(distancesAsString);
-                                        
                                         // make sure the destination bin at least ends at the end of the day
                                         destinationBin = destinationBin >= 0 ? destinationBin : 24 * 12;
                                         // Create the activity duration portion
@@ -179,8 +175,40 @@ namespace ConvertCellTraces
                                         {
                                             // for each time bin
                                             writer.Write(',');
-                                            writer.Write(originBin <= i && i <= destinationBin ? '1' : '0');
+                                            writer.Write(originBin <= i && i <= destinationBin ? "1.0" : "0.0");
                                         }
+                                        // Write out the density variables for origin then destination (population,employment,household)
+                                        int origin = int.Parse(step.Origin);
+                                        int destination = int.Parse(step.Destination);
+                                        if (densityData.TryGetValue(origin, out var originDensity))
+                                        {
+                                            writer.Write(',');
+                                            writer.Write(originDensity.PopulationDensity);
+                                            writer.Write(',');
+                                            writer.Write(originDensity.EmploymentDensity);
+                                            writer.Write(',');
+                                            writer.Write(originDensity.HouseholdDensity);
+                                        }
+                                        else
+                                        {
+                                            writer.Write(",0.0,0.0,0.0");
+                                        }
+                                        if (densityData.TryGetValue(destination, out var densityDensity))
+                                        {
+                                            writer.Write(',');
+                                            writer.Write(densityDensity.PopulationDensity);
+                                            writer.Write(',');
+                                            writer.Write(densityDensity.EmploymentDensity);
+                                            writer.Write(',');
+                                            writer.Write(densityDensity.HouseholdDensity);
+                                        }
+                                        else
+                                        {
+                                            writer.Write(",0.0,0.0,0.0");
+                                        }
+                                        // write the total distance of the trip
+                                        writer.Write(',');
+                                        writer.Write(TripDistance(zones, origin, destination));
                                         writer.WriteLine();
                                     }
                                 }
@@ -188,7 +216,16 @@ namespace ConvertCellTraces
                         }
                     }
                 }
-            }
+            });
+        }
+
+        private static float TripDistance(Dictionary<int, Zone> zones, int origin, int destination)
+        {
+            var o = zones[origin];
+            var d = zones[destination];
+            var dx = o.X - d.X;
+            var dy = o.Y - d.Y;
+            return MathF.Sqrt(dx * dx + dy + dy);
         }
 
         private static void WriteHeaders(StreamWriter writer)
@@ -205,6 +242,9 @@ namespace ConvertCellTraces
                 writer.Write(",Active");
                 writer.Write(i);
             }
+            writer.Write(",OriginPopulationDensity,OriginEmploymentDensity,OriginHouseholdDensity");
+            writer.Write(",DestinationPopulationDensity,DestinationEmploymentDensity,DestinationHouseholdDensity");
+            writer.Write(",TripDistance");
             writer.WriteLine();
         }
 

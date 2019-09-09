@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>bdcc2236-9aed-4409-9ebb-26e5ad268e44</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>EstimateModeChoiceModel.py</StartupFile>
+    <StartupFile>PackedEstimateModeChoiceModel.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>

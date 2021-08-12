@@ -46,15 +46,15 @@ namespace ProduceTravelTimesFromRoadNetwork
             Network networkAM = null, networkMD = null, networkPM = null, networkEV = null, fullNetwork = null;
             Dictionary<int, DensityData> densityData = null;
             Parallel.Invoke(
-                () => networkAM = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\AM.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
-                                        , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsAM.txt"),
-                () => networkMD = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\MD.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
-                                        , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsMD.txt"),
-                () => networkPM = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\PM.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
-                                        , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsPM.txt"),
-                () => networkEV = Network.LoadNetwork(@"G:\TMG\Research\Montevideo\NetworkModel\EV.nwp", @"G:\TMG\Research\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
-                                        , @"G:\TMG\Research\Montevideo\NetworkModel\AllPathsEV.txt"),
-                () => densityData = DensityData.LoadDensityData(@"G:\TMG\Research\Montevideo\Cell data\AntelZoneData.csv")
+                () => networkAM = Network.LoadNetwork(@"G:\TMG\Research\Old\Montevideo\NetworkModel\AM.nwp", @"G:\TMG\Research\Old\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
+                                        , @"G:\TMG\Research\Old\Montevideo\NetworkModel\AllPathsAM.txt"),
+                () => networkMD = Network.LoadNetwork(@"G:\TMG\Research\Old\Montevideo\NetworkModel\MD.nwp", @"G:\TMG\Research\Old\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
+                                        , @"G:\TMG\Research\Old\Montevideo\NetworkModel\AllPathsMD.txt"),
+                () => networkPM = Network.LoadNetwork(@"G:\TMG\Research\Old\Montevideo\NetworkModel\PM.nwp", @"G:\TMG\Research\Old\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
+                                        , @"G:\TMG\Research\Old\Montevideo\NetworkModel\AllPathsPM.txt"),
+                () => networkEV = Network.LoadNetwork(@"G:\TMG\Research\Old\Montevideo\NetworkModel\EV.nwp", @"G:\TMG\Research\Old\Montevideo\Shapefiles\StudyArea\AntelZones.shp", "ZoneID"
+                                        , @"G:\TMG\Research\Old\Montevideo\NetworkModel\AllPathsEV.txt"),
+                () => densityData = DensityData.LoadDensityData(@"G:\TMG\Research\Old\Montevideo\Cell data\AntelZoneData.csv")
             );
             stopwatch.Stop();
             Console.WriteLine(stopwatch.ElapsedMilliseconds + "ms");
@@ -82,8 +82,8 @@ namespace ProduceTravelTimesFromRoadNetwork
                 // WriteHeaders(writer, false); WriteHeaders(writer2, false);
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
-                foreach (var personRecord in TransitData.StreamTransitRiderDays(@"G:\TMG\Research\Montevideo\NewTransitData\2018.12.04\od_may_2018_vero.csv", networks[0], TransitData.LoadStopToStop(
-                @"G:\TMG\Research\Montevideo\BusNetwork\BusStopsEmmeIDmapping.csv")))
+                foreach (var personRecord in TransitData.StreamTransitRiderDays(@"G:\TMG\Research\Old\Montevideo\NewTransitData\2018.12.04\od_may_2018_vero.csv", networks[0], TransitData.LoadStopToStop(
+                @"G:\TMG\Research\Old\Montevideo\BusNetwork\BusStopsEmmeIDmapping.csv")))
                 {
                     // Convert into a survey entry
                     SurveyEntry entry = new SurveyEntry();
@@ -132,7 +132,7 @@ namespace ProduceTravelTimesFromRoadNetwork
                 StringBuilder builder = new StringBuilder();
                 StringBuilder builder2 = new StringBuilder();
                 //bool first = true;
-                foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Montevideo\MHMS\Trips.csv"))
+                foreach (var personRecord in Survey.EnumerateSurvey(@"G:\TMG\Research\Old\Montevideo\MHMS\Trips.csv"))
                 {
                     if (RecordsFor(builder, builder2, networks, personRecord, false, densityData))
                     {
@@ -160,7 +160,7 @@ namespace ProduceTravelTimesFromRoadNetwork
             using (StreamWriter writer = new StreamWriter("ReadCellTraces.csv"))
             {
                 WriteHeaders(writer, true);
-                foreach (var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv", densityData)
+                foreach (var toWrite in Survey.EnumerateCellTraces(networkAM, @"G:\TMG\Research\Old\Montevideo\Cell data\dailytraces_caf.json\data_lake\Movilidad\Converted\Steps.csv", densityData)
                     .AsParallel()
                     .Select(personRecord => CleanPersonRecord(networkAM, personRecord))
                     .Select(personRecord =>
